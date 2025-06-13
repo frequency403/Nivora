@@ -7,9 +7,9 @@ namespace Nivora.Core;
 
 public static class Argon2Hash
 {
-    public static async Task<string> HashBase64(string password) => Convert.ToBase64String(await HashCore(password));
-    public static Task<byte[]> HashBytes(string password) => HashCore(password);
-    private static async Task<byte[]> HashCore(string password, int iterations = 3, int memory = 65536, int parallelism = 1)
+    public static async Task<string> HashBase64(string password, int iterations = 3, int memory = 65536, int parallelism = 1) => Convert.ToBase64String(await HashCore(password, iterations, memory, parallelism));
+    public static Task<byte[]> HashBytes(string password, int iterations = 3, int memory = 65536, int parallelism = 1) => HashCore(password, iterations, memory, parallelism);
+    private static async Task<byte[]> HashCore(string password, int iterations, int memory, int parallelism)
     {
         if (string.IsNullOrEmpty(password))
             throw new ArgumentException("Password cannot be null or empty.", nameof(password));
