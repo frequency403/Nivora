@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nivora.Core", "Nivora.Core\Nivora.Core.csproj", "{C513F4C2-9A5E-4B07-9EC1-3552A02EE715}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nivora.Cli", "Nivora.Cli\Nivora.Cli.csproj", "{22FA9262-5591-495D-A36F-CB514F746228}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{C513F4C2-9A5E-4B07-9EC1-3552A02EE715}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C513F4C2-9A5E-4B07-9EC1-3552A02EE715}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C513F4C2-9A5E-4B07-9EC1-3552A02EE715}.Release|Any CPU.Build.0 = Release|Any CPU
+		{22FA9262-5591-495D-A36F-CB514F746228}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{22FA9262-5591-495D-A36F-CB514F746228}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{22FA9262-5591-495D-A36F-CB514F746228}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{22FA9262-5591-495D-A36F-CB514F746228}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -5,8 +5,8 @@ namespace Nivora.Cli;
 
 class Program
 {
-    static void Main(string[] args)
+    static async Task Main(string[] args)
     {
-        Console.WriteLine(Argon2Hash.Hash("yourMomGhey", new Salt()));
+        Console.WriteLine(await Argon2Hash.HashBase64("yourMomGhey"));
     }
 }
