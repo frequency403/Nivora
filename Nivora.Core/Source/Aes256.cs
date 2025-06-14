@@ -96,6 +96,84 @@ public class Aes256
 
             return decrypted;
         }
+        
+        /// <summary>
+        /// Encrypts the data from a source stream and writes the encrypted data to a destination stream using AES-256 CBC with PKCS7 padding.
+        /// </summary>
+        /// <param name="inputStream">Source stream with plain data.</param>
+        /// <param name="outputStream">Destination stream to receive encrypted data.</param>
+        /// <param name="key">Encryption key (32 bytes).</param>
+        /// <param name="iv">Initialization vector (16 bytes).</param>
+        /// <param name="bufferSize">Buffer size for reading/writing (default: 4096 bytes).</param>
+        public static async Task EncryptStream(Stream inputStream, Stream outputStream, byte[] key, byte[] iv, int bufferSize = 4096, CancellationToken token = default)
+        {
+            if (key is not { Length: 32 })
+                throw new ArgumentException("Key must be 32 bytes for AES-256.", nameof(key));
+            if (iv is not { Length: 16 })
+                throw new ArgumentException("IV must be 16 bytes.", nameof(iv));
+            if (!inputStream.CanRead)
+                throw new ArgumentException("Input stream must be readable.", nameof(inputStream));
+            if (!outputStream.CanWrite)
+                throw new ArgumentException("Output stream must be writable.", nameof(outputStream));
+
+            // Create cipher for AES-256 CBC with PKCS7 padding
+            var cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(new AesEngine()));
+            cipher.Init(true, new ParametersWithIV(new KeyParameter(key), iv));
+
+            var inputBuffer = new byte[bufferSize];
+            var outputBuffer = new byte[cipher.GetOutputSize(bufferSize)];
+            int bytesRead;
+            int outputLen;
+            while ((bytesRead = await inputStream.ReadAsync(inputBuffer, token)) > 0)
+            {
+                outputLen = cipher.ProcessBytes(inputBuffer, 0, bytesRead, outputBuffer, 0);
+                if (outputLen > 0)
+                    await outputStream.WriteAsync(outputBuffer.AsMemory(0, outputLen), token);
+            }
+            // Finalize encryption and write any remaining bytes
+            outputLen = cipher.DoFinal(outputBuffer, 0);
+            if (outputLen > 0)
+                await outputStream.WriteAsync(outputBuffer.AsMemory(0, outputLen), token);
+        }
+
+        /// <summary>
+        /// Decrypts the data from a source stream and writes the decrypted data to a destination stream using AES-256 CBC with PKCS7 padding.
+        /// </summary>
+        /// <param name="inputStream">Source stream with encrypted data.</param>
+        /// <param name="outputStream">Destination stream for decrypted data.</param>
+        /// <param name="key">Decryption key (32 bytes).</param>
+        /// <param name="iv">Initialization vector (16 bytes).</param>
+        /// <param name="bufferSize">Buffer size for reading/writing (default: 4096 bytes).</param>
+        public static async Task DecryptStream(Stream inputStream, Stream outputStream, byte[] key, byte[] iv, int bufferSize = 4096, CancellationToken token = default)
+        {
+            if (key is not { Length: 32 })
+                throw new ArgumentException("Key must be 32 bytes for AES-256.", nameof(key));
+            if (iv is not { Length: 16 })
+                throw new ArgumentException("IV must be 16 bytes.", nameof(iv));
+            if (!inputStream.CanRead)
+                throw new ArgumentException("Input stream must be readable.", nameof(inputStream));
+            if (!outputStream.CanWrite)
+                throw new ArgumentException("Output stream must be writable.", nameof(outputStream));
+
+            // Create cipher for AES-256 CBC with PKCS7 padding
+            var cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(new AesEngine()));
+            cipher.Init(false, new ParametersWithIV(new KeyParameter(key), iv));
+
+            var inputBuffer = new byte[bufferSize];
+            var outputBuffer = new byte[cipher.GetOutputSize(bufferSize)];
+            int bytesRead;
+            int outputLen;
+            while ((bytesRead = await inputStream.ReadAsync(inputBuffer, token)) > 0)
+            {
+                outputLen = cipher.ProcessBytes(inputBuffer, 0, bytesRead, outputBuffer, 0);
+                if (outputLen > 0)
+                    await outputStream.WriteAsync(outputBuffer.AsMemory(0, outputLen), token);
+            }
+            // Finalize decryption and write any remaining bytes
+            outputLen = cipher.DoFinal(outputBuffer, 0);
+            if (outputLen > 0)
+                await outputStream.WriteAsync(outputBuffer.AsMemory(0, outputLen), token);
+        }
 
         /// <summary>
         /// Generates a random key for AES encryption.

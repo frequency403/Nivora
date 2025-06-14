@@ -7,19 +7,21 @@ namespace Nivora.Core;
 
 public static class Argon2Hash
 {
-    public static async Task<string> HashBase64(string password, int iterations = 3, int memory = 65536, int parallelism = 1) => Convert.ToBase64String(await HashCore(password, iterations, memory, parallelism));
-    public static Task<byte[]> HashBytes(string password, int iterations = 3, int memory = 65536, int parallelism = 1) => HashCore(password, iterations, memory, parallelism);
-    private static async Task<byte[]> HashCore(string password, int iterations, int memory, int parallelism)
+    
+    
+    public static async Task<string> HashBase64(string password, int iterations = 3, int memory = 65536, int parallelism = 1, byte[]? salt = null) => Convert.ToBase64String(await HashCore(password, iterations, memory, parallelism, salt));
+    public static Task<byte[]> HashBytes(string password, int iterations = 3, int memory = 65536, int parallelism = 1, byte[]? salt = null) => HashCore(password, iterations, memory, parallelism, salt);
+    private static async Task<byte[]> HashCore(string password, int iterations, int memory, int parallelism, byte[]? salt)
     {
         if (string.IsNullOrEmpty(password))
             throw new ArgumentException("Password cannot be null or empty.", nameof(password));
-
+        
         var generator = new Argon2BytesGenerator();
         var parameters = new Argon2Parameters.Builder()
             .WithMemoryAsKB(memory)
             .WithIterations(iterations)
             .WithParallelism(parallelism)
-            .WithSalt(Salt.Generate().Bytes)
+            .WithSalt(salt ?? Salt.Generate().Bytes)
             .WithVersion(Argon2Parameters.Version13)
             .Build();
         generator.Init(parameters);

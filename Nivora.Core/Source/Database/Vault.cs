@@ -7,7 +7,7 @@ namespace Nivora.Core.Database;
 
 public class Vault : IDisposable, IAsyncDisposable
 {
-    private const string DefaultVaultExtension = ".niv";
+    private const string DefaultVaultExtension = "niv";
     private const string DefaultVaultName = "vault";
     private const string MagicNumber = "NIVR";
     
@@ -41,8 +41,6 @@ public class Vault : IDisposable, IAsyncDisposable
         var fileInfo = new FileInfo(path);
         if (!fileInfo.Exists)
             return null;
-        if (!fileInfo.IsReadOnly)
-            throw new InvalidOperationException("Vault file is not read-only. Please ensure the file is not being modified by another process.");
 
         var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
         var filePathIv = ShuffleBytes(filePathBytes, 16);
@@ -134,7 +132,7 @@ public class Vault : IDisposable, IAsyncDisposable
             throw new InvalidOperationException("Content cannot be empty.");
         }
 
-        var derivedKey = await Argon2Hash.HashBytes(password, argon2Iterations, argon2Memory, argon2Parallelism);
+        var derivedKey = await Argon2Hash.HashBytes(password, argon2Iterations, argon2Memory, argon2Parallelism, salt);
         var decryptedContent = Aes256.Decrypt(content, derivedKey, iv);
         var memoryDatabase = new SqliteConnection("Data Source=:memory:");
         await memoryDatabase.OpenAsync(token);
@@ -161,6 +159,79 @@ public class Vault : IDisposable, IAsyncDisposable
             Version = version,
             Connection = memoryDatabase
         };
+    }
+
+    private static async Task<Vault?> CreateVault(string path, string password, CancellationToken token)
+    {
+        var fileInfo = new FileInfo(path);
+        if (fileInfo.Exists)
+            throw new InvalidOperationException(
+                "Vault file already exists. Please choose a different path or delete the existing file.");
+        if (!fileInfo.Directory?.Exists ?? true)
+        {
+            fileInfo.Directory?.Create();
+        }
+        
+        var salt = Salt.Generate(16).Bytes;
+        const int argon2Memory = 65536; // 64 MB
+        const int argon2Iterations = 3;
+        const int argon2Parallelism = 1;
+        var iv = Aes256.GenerateRandomIv();
+
+        // Create a temporary in-memory database
+        await using var memoryDatabase = new SqliteConnection("Data Source=:memory:");
+        await memoryDatabase.OpenAsync(token);
+
+        // Create tables and initial structure
+        await using (var command = memoryDatabase.CreateCommand())
+        {
+            command.CommandText = Secret.CreateTableSql;
+            await command.ExecuteNonQueryAsync(token);
+        }
+
+        var tempFilePath = System.IO.Path.GetTempFileName();
+        // Backup the in-memory database to a file
+        await using (var fileDatabase = new SqliteConnection($"Data Source={tempFilePath};"))
+        {
+            await fileDatabase.OpenAsync(token);
+            memoryDatabase.BackupDatabase(fileDatabase);
+            await fileDatabase.CloseAsync();
+        }
+        
+        await using var databaseStream =
+            new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        await using var encryptedStream = new MemoryStream();
+        await Aes256.EncryptStream(databaseStream, encryptedStream, await Argon2Hash.HashBytes(password, argon2Iterations, argon2Memory, argon2Parallelism, salt), iv, token: token);
+
+        // Prepare content for encryption
+        await using (var contentStream = new MemoryStream())
+        {
+            await using (var tlvStream = new TlvStream(contentStream, false))
+            {
+                await tlvStream.WriteAllAsync([
+                    TlvElement.Magic,
+                    TlvElement.Version,
+                    TlvElement.SaltFromBytes(salt),
+                    TlvElement.Argon2Memory(argon2Memory),
+                    TlvElement.Argon2Iterations(argon2Iterations),
+                    TlvElement.Argon2Parallelism(argon2Parallelism),
+                    TlvElement.Iv(iv),
+                    TlvElement.Content(encryptedStream.ToArray())
+                ], token);
+            }
+            
+            var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
+            var filePathIv = ShuffleBytes(filePathBytes, 16);
+            contentStream.Position = 0;
+            await using var cryptoStream = new MemoryStream();
+            await Aes256.EncryptStream(contentStream, cryptoStream, filePathBytes, filePathIv, token: token);
+            await using var fileStream =
+                new FileStream(fileInfo.FullName, FileMode.Create, FileAccess.Write, FileShare.None);
+            await fileStream.WriteAsync(cryptoStream.ToArray(), token);
+        }
+
+
+        return await OpenVault(path, password, token);
     }
 
     /// <summary>
@@ -205,20 +276,21 @@ public class Vault : IDisposable, IAsyncDisposable
         return bytes;
     }
     
-    public static Vault? CreateNew(string password, CancellationToken token)
+    private static string GetVaultPath(string? vaultName = null)
     {
-        var path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), string.Join(".", DefaultVaultName, DefaultVaultExtension));
-        
-        
-        return null;
+        if (string.IsNullOrEmpty(vaultName))
+            vaultName = DefaultVaultName;
+        return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nivora", $"{vaultName}.{DefaultVaultExtension}");
     }
     
-    public static Task<Vault?> OpenExisting(string path, string password, CancellationToken token)
+    public static Task<Vault?> CreateNew(string password, string? vaultName = null, CancellationToken token = default)
     {
-        if (string.IsNullOrEmpty(path))
-            throw new ArgumentException("Path cannot be null or empty.", nameof(path));
-        return OpenVault(path, password, token);
+        if (string.IsNullOrEmpty(password))
+            throw new ArgumentException("Password cannot be null or empty.", nameof(password));
+        return CreateVault(GetVaultPath(vaultName), password, token);
     }
+    
+    public static Task<Vault?> OpenExisting(string password, string? vaultName = null, CancellationToken token = default) => OpenVault(GetVaultPath(vaultName), password, token);
 
     public void Dispose()
     {

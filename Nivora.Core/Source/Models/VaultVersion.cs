@@ -4,6 +4,8 @@ namespace Nivora.Core.Models;
 
 public record VaultVersion
 {
+    public static VaultVersion Current { get; } = new(1, 0, 0);
+    
     public int Major { get; set; } = 0;
     public int Minor { get; set; } = 0;
     public int Patch { get; set; } = 0;
@@ -57,4 +59,6 @@ public record VaultVersion
     {
         return [(byte)Major, (byte)Minor, (byte)Patch];
     }
+
+    public override string ToString() => $"{nameof(VaultVersion)}: {Major}.{Minor}.{Patch}";
 }

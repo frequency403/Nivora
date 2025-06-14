@@ -1,4 +1,6 @@
 using System.Dynamic;
+using System.Text;
+using Nivora.Core.Models;
 
 namespace Nivora.Core;
 
@@ -8,14 +10,16 @@ namespace Nivora.Core;
 public class TlvStream : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
-
+    private bool _closeStream;
     /// <summary>
     /// Initializes a new instance for reading or writing TLV data.
     /// </summary>
     /// <param name="stream">The underlying stream.</param>
-    public TlvStream(Stream stream)
+    /// <param name="closeStream">Closes the underlying stream on disposal</param>
+    public TlvStream(Stream? stream = null, bool closeStream = true)
     {
-        _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+        _closeStream = !closeStream ? stream is null : closeStream;
+        _stream = stream ?? new MemoryStream();
     }
 
     /// <summary>
@@ -196,12 +200,14 @@ public class TlvStream : IDisposable, IAsyncDisposable
 
     public void Dispose()
     {
-        _stream.Dispose();
+        if (_closeStream)
+            _stream.Dispose();
     }
 
     public async ValueTask DisposeAsync()
     {
-        await _stream.DisposeAsync();
+        if (_closeStream)
+            await _stream.DisposeAsync();
     }
 }
 
@@ -230,6 +236,19 @@ public class TlvElement
         Tag = tag;
         Value = value ?? throw new ArgumentNullException(nameof(value));
     }
+    
+    private const string MagicNumber = "NIVR";
+    public static TlvElement Magic => new(TlvTag.Magic, Encoding.UTF8.GetBytes(MagicNumber));
+    public static TlvElement Version => new(TlvTag.Version, VaultVersion.Current.ToBytes());
+    public static TlvElement Salt => new(TlvTag.Salt, Nivora.Core.Models.Salt.Generate().Bytes);
+    public static TlvElement SaltFromBytes(byte[] saltBytes) => new(TlvTag.Salt, saltBytes ?? throw new ArgumentNullException(nameof(saltBytes)));
+    
+    public static TlvElement Argon2Memory(int memory) => new(TlvTag.Argon2Memory, BitConverter.GetBytes(memory));
+    public static TlvElement Argon2Iterations(int iterations) => new(TlvTag.Argon2Iterations, BitConverter.GetBytes(iterations));
+    public static TlvElement Argon2Parallelism(int parallelism) => new(TlvTag.Argon2Parallelism, BitConverter.GetBytes(parallelism));
+    public static TlvElement Iv(byte[] iv) => new(TlvTag.Iv, iv ?? throw new ArgumentNullException(nameof(iv)));
+    public static TlvElement Content(byte[] content) => new(TlvTag.Content, content ?? throw new ArgumentNullException(nameof(content)));
+    
 }
 
 public record TlvTag
