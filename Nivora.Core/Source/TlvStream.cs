@@ -11,6 +11,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private bool _closeStream;
+
     /// <summary>
     /// Initializes a new instance for reading or writing TLV data.
     /// </summary>
@@ -178,6 +179,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
         {
             list.Add(element);
         }
+
         return list;
     }
 
@@ -186,7 +188,8 @@ public class TlvStream : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>An async enumerable of TLV elements.</returns>
-    public async IAsyncEnumerable<TlvElement> ReadAllAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<TlvElement> ReadAllAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         while (true)
         {
@@ -194,6 +197,26 @@ public class TlvStream : IDisposable, IAsyncDisposable
             if (element == null)
                 yield break;
             yield return element;
+        }
+    }
+    
+    public Stream Stream => _stream;
+
+    /// <summary>
+    /// Writes the contents of the TLV stream to a byte array.
+    /// </summary>
+    /// <returns>A byte array containing the TLV data.</returns>
+    public byte[] ToBytes()
+    {
+        if (_stream is MemoryStream memoryStream)
+        {
+            return memoryStream.ToArray();
+        }
+        else
+        {
+            using var ms = new MemoryStream();
+            _stream.CopyTo(ms);
+            return ms.ToArray();
         }
     }
 
@@ -236,29 +259,38 @@ public class TlvElement
         Tag = tag;
         Value = value ?? throw new ArgumentNullException(nameof(value));
     }
-    
+
     private const string MagicNumber = "NIVR";
     public static TlvElement Magic => new(TlvTag.Magic, Encoding.UTF8.GetBytes(MagicNumber));
     public static TlvElement Version => new(TlvTag.Version, VaultVersion.Current.ToBytes());
     public static TlvElement Salt => new(TlvTag.Salt, Nivora.Core.Models.Salt.Generate().Bytes);
-    public static TlvElement SaltFromBytes(byte[] saltBytes) => new(TlvTag.Salt, saltBytes ?? throw new ArgumentNullException(nameof(saltBytes)));
-    
+
+    public static TlvElement SaltFromBytes(byte[] saltBytes) =>
+        new(TlvTag.Salt, saltBytes ?? throw new ArgumentNullException(nameof(saltBytes)));
+
     public static TlvElement Argon2Memory(int memory) => new(TlvTag.Argon2Memory, BitConverter.GetBytes(memory));
-    public static TlvElement Argon2Iterations(int iterations) => new(TlvTag.Argon2Iterations, BitConverter.GetBytes(iterations));
-    public static TlvElement Argon2Parallelism(int parallelism) => new(TlvTag.Argon2Parallelism, BitConverter.GetBytes(parallelism));
+
+    public static TlvElement Argon2Iterations(int iterations) =>
+        new(TlvTag.Argon2Iterations, BitConverter.GetBytes(iterations));
+
+    public static TlvElement Argon2Parallelism(int parallelism) =>
+        new(TlvTag.Argon2Parallelism, BitConverter.GetBytes(parallelism));
+
     public static TlvElement Iv(byte[] iv) => new(TlvTag.Iv, iv ?? throw new ArgumentNullException(nameof(iv)));
-    public static TlvElement Content(byte[] content) => new(TlvTag.Content, content ?? throw new ArgumentNullException(nameof(content)));
-    
+
+    public static TlvElement Content(byte[] content) =>
+        new(TlvTag.Content, content ?? throw new ArgumentNullException(nameof(content)));
 }
 
 public record TlvTag
 {
     public byte Value { get; }
+
     private TlvTag(byte Value)
     {
         this.Value = Value;
     }
-    
+
     internal static TlvTag FromByte(byte value)
     {
         return value switch
@@ -274,7 +306,7 @@ public record TlvTag
             _ => throw new InvalidDataException($"Unknown TLV tag: {value}")
         };
     }
-    
+
     public static TlvTag Magic => new(0x01);
     public static TlvTag Version => new(0x02);
     public static TlvTag Salt => new(0x03);

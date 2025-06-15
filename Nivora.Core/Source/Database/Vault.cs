@@ -1,7 +1,9 @@
 using System.Text;
+using Dapper;
 using Microsoft.Data.Sqlite;
 using Nivora.Core.Database.Models;
 using Nivora.Core.Models;
+using Nivora.Core.Streams;
 
 namespace Nivora.Core.Database;
 
@@ -10,30 +12,43 @@ public class Vault : IDisposable, IAsyncDisposable
     private const string DefaultVaultExtension = "niv";
     private const string DefaultVaultName = "vault";
     private const string MagicNumber = "NIVR";
-    
+
     public required string Path { get; init; }
     public required VaultVersion Version { get; init; }
     public required SqliteConnection Connection { private get; init; }
-    private Vault(){}
 
-    public Secret? GetSecret(string name)
+    private Vault()
     {
+    }
+
+    public async Task<Secret?> GetSecret(string name) =>
+        await Connection.QuerySingleOrDefaultAsync<Secret>("SELECT * FROM Secrets WHERE Name = @Name",
+            new { Name = name });
+
+    public async Task<Secret?> AddSecret(Secret secret)
+    {
+        var rowsAffected =
+            await Connection.ExecuteAsync("INSERT INTO Secrets (Name, Iv, Value) VALUES (@Name, @Iv, @Value)", secret) >
+            0;
+        if (rowsAffected) return await GetSecret(secret.Name);
         return null;
     }
-    
-    public void AddSecret(Secret secret)
+
+    public async Task<Secret?> UpdateSecret(Secret secret)
     {
-        // Implementation for adding a secret to the vault
+        var rowsAffected =
+            await Connection.ExecuteAsync(
+                "UPDATE Secrets SET Iv = @Iv, Value = @Value, UpdatedAt = CURRENT_TIMESTAMP WHERE Name = @Name",
+                secret) > 0;
+        if (rowsAffected) return await GetSecret(secret.Name);
+        return null;
     }
-    
-    public void UpdateSecret(Secret secret)
+
+    public async Task<bool> DeleteSecret(string name)
     {
-        // Implementation for updating a secret in the vault
-    }
-    
-    public void DeleteSecret(string name)
-    {
-        // Implementation for deleting a secret from the vault
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentException("Name cannot be null or empty.", nameof(name));
+        return await Connection.ExecuteAsync("DELETE FROM Secrets WHERE Name = @Name", new { Name = name }) > 0;
     }
 
     private static async Task<Vault?> OpenVault(string path, string password, CancellationToken token)
@@ -44,96 +59,15 @@ public class Vault : IDisposable, IAsyncDisposable
 
         var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
         var filePathIv = ShuffleBytes(filePathBytes, 16);
-        var decryptedFileBytes = Aes256.Decrypt(await File.ReadAllBytesAsync(fileInfo.FullName, token), filePathBytes, filePathIv);
+        var decryptedFileBytes = Aes256.Decrypt(await File.ReadAllBytesAsync(fileInfo.FullName, token), filePathBytes,
+            filePathIv);
         await using var fileStream = new MemoryStream(decryptedFileBytes);
-        await using var tlvStream = new TlvStream(fileStream);
-        TlvElement? magicElement = null;
-        TlvElement? versionElement = null;
-        TlvElement? saltElement = null;
-        TlvElement? argon2MemoryElement = null;
-        TlvElement? argon2IterationsElement = null;
-        TlvElement? argon2ParallelismElement = null;
-        TlvElement? ivElement = null;
-        TlvElement? contentElement = null;
+        await using var tlvStream = new TlvStream(fileStream, true);
+        var parameters = await VaultParameters.ReadFromTlvStream(tlvStream, token);
 
-        await foreach (var element in tlvStream.ReadAllAsync(token))
-        {
-            if (TlvTag.Magic.Equals(element.Tag))
-            {
-                magicElement = element;
-            }
-            else if (TlvTag.Version.Equals(element.Tag))
-            {
-                versionElement = element;
-            }
-            else if (TlvTag.Salt.Equals(element.Tag))
-            {
-                saltElement = element;
-            }
-            else if (TlvTag.Argon2Memory.Equals(element.Tag))
-            {
-                argon2MemoryElement = element;
-            }
-            else if (TlvTag.Argon2Iterations.Equals(element.Tag))
-            {
-                argon2IterationsElement = element;
-            }
-            else if (TlvTag.Argon2Parallelism.Equals(element.Tag))
-            {
-                argon2ParallelismElement = element;
-            }
-            else if (TlvTag.Iv.Equals(element.Tag))
-            {
-                ivElement = element;
-            }
-            else if (TlvTag.Content.Equals(element.Tag))
-            {
-                contentElement = element;
-            }
-        }
-        
-        if (magicElement == null || versionElement == null || saltElement == null ||
-            argon2MemoryElement == null || argon2IterationsElement == null ||
-            argon2ParallelismElement == null || ivElement == null || contentElement == null)
-        {
-            throw new InvalidOperationException("Invalid vault file format.");
-        }
-        
-        if (magicElement.Value.Length != 4 || !Encoding.UTF8.GetString(magicElement.Value).Equals(MagicNumber))
-        {
-            throw new InvalidOperationException("Invalid vault file format.");
-        }
-        
-        if (!VaultVersion.TryFromBytes(versionElement.Value, out var version))
-        {
-            throw new InvalidOperationException("Unsupported or unknown vault version.");
-        }
-        
-        var salt = saltElement.Value;
-        if (salt.Length < 16)
-        {
-            throw new InvalidOperationException("Salt must be at least 16 bytes long.");
-        }
-        var argon2Memory = BitConverter.ToInt32(argon2MemoryElement.Value, 0);
-        var argon2Iterations = BitConverter.ToInt32(argon2IterationsElement.Value, 0);
-        var argon2Parallelism = BitConverter.ToInt32(argon2ParallelismElement.Value, 0);
-        if (argon2Memory <= 0 || argon2Iterations <= 0 || argon2Parallelism <= 0)
-        {
-            throw new InvalidOperationException("Argon2 parameters must be positive integers.");
-        }
-        var iv = ivElement.Value;
-        if (iv.Length != 16)
-        {
-            throw new InvalidOperationException("IV must be exactly 16 bytes long.");
-        }
-        var content = contentElement.Value;
-        if (content.Length == 0)
-        {
-            throw new InvalidOperationException("Content cannot be empty.");
-        }
-
-        var derivedKey = await Argon2Hash.HashBytes(password, argon2Iterations, argon2Memory, argon2Parallelism, salt);
-        var decryptedContent = Aes256.Decrypt(content, derivedKey, iv);
+        var derivedKey = await Argon2Hash.HashBytes(password, parameters.Argon2Iterations, parameters.Argon2Memory,
+            parameters.Argon2Parallelism, parameters.Salt);
+        var decryptedContent = Aes256.Decrypt(parameters.Content, derivedKey, parameters.Iv);
         var memoryDatabase = new SqliteConnection("Data Source=:memory:");
         await memoryDatabase.OpenAsync(token);
 
@@ -149,14 +83,15 @@ public class Vault : IDisposable, IAsyncDisposable
                 await fileDatabase.CloseAsync();
             }
         }
+
         await memoryDatabase.CloseAsync();
         File.Delete(tempFilePath);
-        
-        
+
+
         return new Vault
         {
             Path = fileInfo.FullName,
-            Version = version,
+            Version = parameters.Version,
             Connection = memoryDatabase
         };
     }
@@ -171,12 +106,8 @@ public class Vault : IDisposable, IAsyncDisposable
         {
             fileInfo.Directory?.Create();
         }
-        
-        var salt = Salt.Generate(16).Bytes;
-        const int argon2Memory = 65536; // 64 MB
-        const int argon2Iterations = 3;
-        const int argon2Parallelism = 1;
-        var iv = Aes256.GenerateRandomIv();
+
+        var parameters = VaultParameters.Default;
 
         // Create a temporary in-memory database
         await using var memoryDatabase = new SqliteConnection("Data Source=:memory:");
@@ -189,49 +120,39 @@ public class Vault : IDisposable, IAsyncDisposable
             await command.ExecuteNonQueryAsync(token);
         }
 
-        var tempFilePath = System.IO.Path.GetTempFileName();
-        // Backup the in-memory database to a file
-        await using (var fileDatabase = new SqliteConnection($"Data Source={tempFilePath};"))
-        {
-            await fileDatabase.OpenAsync(token);
-            memoryDatabase.BackupDatabase(fileDatabase);
-            await fileDatabase.CloseAsync();
-        }
-        
-        await using var databaseStream =
-            new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        await using var databaseStream = await WriteDatabaseToFile(memoryDatabase, token);
         await using var encryptedStream = new MemoryStream();
-        await Aes256.EncryptStream(databaseStream, encryptedStream, await Argon2Hash.HashBytes(password, argon2Iterations, argon2Memory, argon2Parallelism, salt), iv, token: token);
+        await Aes256.EncryptStream(databaseStream, encryptedStream,
+            await Argon2Hash.HashBytes(password, parameters.Argon2Iterations, parameters.Argon2Memory,
+                parameters.Argon2Parallelism, parameters.Salt), parameters.Iv, token: token);
 
+        parameters.Content = encryptedStream.ToArray();
         // Prepare content for encryption
-        await using (var contentStream = new MemoryStream())
-        {
-            await using (var tlvStream = new TlvStream(contentStream, false))
-            {
-                await tlvStream.WriteAllAsync([
-                    TlvElement.Magic,
-                    TlvElement.Version,
-                    TlvElement.SaltFromBytes(salt),
-                    TlvElement.Argon2Memory(argon2Memory),
-                    TlvElement.Argon2Iterations(argon2Iterations),
-                    TlvElement.Argon2Parallelism(argon2Parallelism),
-                    TlvElement.Iv(iv),
-                    TlvElement.Content(encryptedStream.ToArray())
-                ], token);
-            }
-            
-            var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
-            var filePathIv = ShuffleBytes(filePathBytes, 16);
-            contentStream.Position = 0;
-            await using var cryptoStream = new MemoryStream();
-            await Aes256.EncryptStream(contentStream, cryptoStream, filePathBytes, filePathIv, token: token);
-            await using var fileStream =
-                new FileStream(fileInfo.FullName, FileMode.Create, FileAccess.Write, FileShare.None);
-            await fileStream.WriteAsync(cryptoStream.ToArray(), token);
-        }
+
+        var tlvStream2 = (await parameters.WriteToTlvStream(token)).Stream;
+        tlvStream2.Position = 0;
+        var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
+        var filePathIv = ShuffleBytes(filePathBytes, 16);
+        await using var cryptoStream = new MemoryStream();
+        await Aes256.EncryptStream(tlvStream2, cryptoStream, filePathBytes, filePathIv, token: token);
+        await using var fileStream =
+            new FileStream(fileInfo.FullName, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+        await fileStream.WriteAsync(cryptoStream.ToArray(), token);
 
 
-        return await OpenVault(path, password, token);
+        return await OpenVault(fileInfo.FullName, password, token);
+    }
+    
+    private static async Task<Stream> WriteDatabaseToFile(SqliteConnection databaseConnection, CancellationToken token = default)
+    {
+        var tempFileStream = new TempFileStream();
+        // Backup the in-memory database to a file
+        await using var fileDatabase = new SqliteConnection($"Data Source={tempFileStream.Path};");
+        await fileDatabase.OpenAsync(token);
+        databaseConnection.BackupDatabase(fileDatabase);
+        await fileDatabase.CloseAsync();
+
+        return tempFileStream;
     }
 
     /// <summary>
@@ -255,12 +176,14 @@ public class Vault : IDisposable, IAsyncDisposable
             {
                 result[index++] = input[left++];
             }
+
             // Add from right
             if (index < result.Length && left <= right)
             {
                 result[index++] = input[right--];
             }
         }
+
         return result;
     }
 
@@ -273,24 +196,27 @@ public class Vault : IDisposable, IAsyncDisposable
             Array.Fill(padding, (byte)0);
             bytes = bytes.Concat(padding).ToArray();
         }
+
         return bytes;
     }
-    
+
     private static string GetVaultPath(string? vaultName = null)
     {
         if (string.IsNullOrEmpty(vaultName))
             vaultName = DefaultVaultName;
-        return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nivora", $"{vaultName}.{DefaultVaultExtension}");
+        return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nivora",
+            $"{vaultName}.{DefaultVaultExtension}");
     }
-    
+
     public static Task<Vault?> CreateNew(string password, string? vaultName = null, CancellationToken token = default)
     {
         if (string.IsNullOrEmpty(password))
             throw new ArgumentException("Password cannot be null or empty.", nameof(password));
         return CreateVault(GetVaultPath(vaultName), password, token);
     }
-    
-    public static Task<Vault?> OpenExisting(string password, string? vaultName = null, CancellationToken token = default) => OpenVault(GetVaultPath(vaultName), password, token);
+
+    public static Task<Vault?> OpenExisting(string password, string? vaultName = null,
+        CancellationToken token = default) => OpenVault(GetVaultPath(vaultName), password, token);
 
     public void Dispose()
     {
