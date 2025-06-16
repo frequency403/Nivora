@@ -13,7 +13,7 @@ public static class ContainerExtensions
         {
             MinimumLevel = LogEventLevel.Information // Default log level
         };
-        
+
         // Register core services here
         services.AddLogging(builder =>
         {
@@ -24,9 +24,9 @@ public static class ContainerExtensions
                 .Enrich.FromLogContext()
                 .Enrich.WithProperty("Application", "Nivora")
                 .CreateLogger(), true);
-        });    
+        });
         services.AddSingleton(logLevelSwitch);
-        
+
         return services;
     }
 }

@@ -1,30 +1,44 @@
-using System.Dynamic;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Nivora.Core.Models;
 
 namespace Nivora.Core;
 
 /// <summary>
-/// Provides methods to write and read custom TLV (Tag-Length-Value) structures, similar to ASN.1 encoding.
+///     Provides methods to write and read custom TLV (Tag-Length-Value) structures, similar to ASN.1 encoding.
 /// </summary>
 public class TlvStream : IDisposable, IAsyncDisposable
 {
-    private readonly Stream _stream;
-    private bool _closeStream;
+    private readonly bool _closeStream;
 
     /// <summary>
-    /// Initializes a new instance for reading or writing TLV data.
+    ///     Initializes a new instance for reading or writing TLV data.
     /// </summary>
     /// <param name="stream">The underlying stream.</param>
     /// <param name="closeStream">Closes the underlying stream on disposal</param>
     public TlvStream(Stream? stream = null, bool closeStream = true)
     {
         _closeStream = !closeStream ? stream is null : closeStream;
-        _stream = stream ?? new MemoryStream();
+        Stream = stream ?? new MemoryStream();
+    }
+
+    public Stream Stream { get; }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_closeStream)
+            await Stream.DisposeAsync();
+    }
+
+
+    public void Dispose()
+    {
+        if (_closeStream)
+            Stream.Dispose();
     }
 
     /// <summary>
-    /// Writes a TLV element to the stream.
+    ///     Writes a TLV element to the stream.
     /// </summary>
     /// <param name="tag">The tag identifier (1 byte, 0-255).</param>
     /// <param name="value">The value as byte array.</param>
@@ -33,21 +47,21 @@ public class TlvStream : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(value);
 
         // Write Tag
-        _stream.WriteByte(tag.Value);
+        Stream.WriteByte(tag.Value);
 
         // Write Length (4 bytes, big endian)
         var lengthBytes = BitConverter.GetBytes(value.Length);
         if (BitConverter.IsLittleEndian)
             Array.Reverse(lengthBytes);
 
-        _stream.Write(lengthBytes, 0, 4);
+        Stream.Write(lengthBytes, 0, 4);
 
         // Write Value
-        _stream.Write(value, 0, value.Length);
+        Stream.Write(value, 0, value.Length);
     }
 
     /// <summary>
-    /// Writes a TLV element to the stream asynchronously.
+    ///     Writes a TLV element to the stream asynchronously.
     /// </summary>
     /// <param name="tag">The tag identifier.</param>
     /// <param name="value">The value as byte array.</param>
@@ -57,31 +71,31 @@ public class TlvStream : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(value);
 
         // Write Tag
-        _stream.WriteByte(tag.Value);
+        Stream.WriteByte(tag.Value);
 
         // Write Length (4 bytes, big endian)
         var lengthBytes = BitConverter.GetBytes(value.Length);
         if (BitConverter.IsLittleEndian)
             Array.Reverse(lengthBytes);
 
-        await _stream.WriteAsync(lengthBytes, 0, 4, cancellationToken).ConfigureAwait(false);
+        await Stream.WriteAsync(lengthBytes, 0, 4, cancellationToken).ConfigureAwait(false);
 
         // Write Value
-        await _stream.WriteAsync(value, 0, value.Length, cancellationToken).ConfigureAwait(false);
+        await Stream.WriteAsync(value, 0, value.Length, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Reads the next TLV element from the stream.
+    ///     Reads the next TLV element from the stream.
     /// </summary>
     /// <returns>The TLV element or null if end of stream.</returns>
     public TlvElement? Read()
     {
-        var tagByte = _stream.ReadByte();
+        var tagByte = Stream.ReadByte();
         if (tagByte == -1) return null; // End of stream
         var tag = TlvTag.FromByte((byte)tagByte);
 
         var lengthBytes = new byte[4];
-        if (_stream.Read(lengthBytes, 0, 4) != 4)
+        if (Stream.Read(lengthBytes, 0, 4) != 4)
             throw new EndOfStreamException("Unexpected end of stream while reading TLV length.");
 
         if (BitConverter.IsLittleEndian)
@@ -95,7 +109,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
         var read = 0;
         while (read < length)
         {
-            var r = _stream.Read(value, read, length - read);
+            var r = Stream.Read(value, read, length - read);
             if (r == 0)
                 throw new EndOfStreamException("Unexpected end of stream while reading TLV value.");
             read += r;
@@ -105,20 +119,20 @@ public class TlvStream : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Reads the next TLV element from the stream asynchronously.
+    ///     Reads the next TLV element from the stream asynchronously.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The TLV element or null if end of stream.</returns>
     public async Task<TlvElement?> ReadAsync(CancellationToken cancellationToken = default)
     {
-        var tagByte = _stream.ReadByte();
+        var tagByte = Stream.ReadByte();
         if (tagByte == -1)
             return null; // End of stream
 
         var tag = TlvTag.FromByte((byte)tagByte);
 
         var lengthBytes = new byte[4];
-        var readLen = await _stream.ReadAsync(lengthBytes, 0, 4, cancellationToken).ConfigureAwait(false);
+        var readLen = await Stream.ReadAsync(lengthBytes, 0, 4, cancellationToken).ConfigureAwait(false);
         if (readLen != 4)
             throw new EndOfStreamException("Unexpected end of stream while reading TLV length.");
 
@@ -133,7 +147,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
         var read = 0;
         while (read < length)
         {
-            var r = await _stream.ReadAsync(value, read, length - read, cancellationToken).ConfigureAwait(false);
+            var r = await Stream.ReadAsync(value, read, length - read, cancellationToken).ConfigureAwait(false);
             if (r == 0)
                 throw new EndOfStreamException("Unexpected end of stream while reading TLV value.");
             read += r;
@@ -143,53 +157,45 @@ public class TlvStream : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Writes multiple TLV elements to the stream.
+    ///     Writes multiple TLV elements to the stream.
     /// </summary>
     /// <param name="elements">The TLV elements to write.</param>
     public void WriteElements(IEnumerable<TlvElement> elements)
     {
-        foreach (var element in elements)
-        {
-            Write(element.Tag, element.Value);
-        }
+        foreach (var element in elements) Write(element.Tag, element.Value);
     }
 
     /// <summary>
-    /// Writes multiple TLV elements to the stream asynchronously.
+    ///     Writes multiple TLV elements to the stream asynchronously.
     /// </summary>
     /// <param name="elements">The TLV elements to write.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task WriteAllAsync(IEnumerable<TlvElement> elements, CancellationToken cancellationToken = default)
     {
         foreach (var element in elements)
-        {
             await WriteAsync(element.Tag, element.Value, cancellationToken).ConfigureAwait(false);
-        }
     }
 
     /// <summary>
-    /// Reads all TLV elements from the stream until end.
+    ///     Reads all TLV elements from the stream until end.
     /// </summary>
     /// <returns>List of TLV elements.</returns>
     public List<TlvElement> ReadAll()
     {
         var list = new List<TlvElement>();
         TlvElement? element;
-        while ((element = Read()) != null)
-        {
-            list.Add(element);
-        }
+        while ((element = Read()) != null) list.Add(element);
 
         return list;
     }
 
     /// <summary>
-    /// Asynchronously reads all TLV elements from the stream as an IAsyncEnumerable.
+    ///     Asynchronously reads all TLV elements from the stream as an IAsyncEnumerable.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>An async enumerable of TLV elements.</returns>
     public async IAsyncEnumerable<TlvElement> ReadAllAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         while (true)
         {
@@ -199,58 +205,30 @@ public class TlvStream : IDisposable, IAsyncDisposable
             yield return element;
         }
     }
-    
-    public Stream Stream => _stream;
 
     /// <summary>
-    /// Writes the contents of the TLV stream to a byte array.
+    ///     Writes the contents of the TLV stream to a byte array.
     /// </summary>
     /// <returns>A byte array containing the TLV data.</returns>
     public byte[] ToBytes()
     {
-        if (_stream is MemoryStream memoryStream)
-        {
-            return memoryStream.ToArray();
-        }
-        else
-        {
-            using var ms = new MemoryStream();
-            _stream.CopyTo(ms);
-            return ms.ToArray();
-        }
-    }
+        if (Stream is MemoryStream memoryStream) return memoryStream.ToArray();
 
-
-    public void Dispose()
-    {
-        if (_closeStream)
-            _stream.Dispose();
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_closeStream)
-            await _stream.DisposeAsync();
+        using var ms = new MemoryStream();
+        Stream.CopyTo(ms);
+        return ms.ToArray();
     }
 }
 
 /// <summary>
-/// Represents a single TLV (Tag-Length-Value) element.
+///     Represents a single TLV (Tag-Length-Value) element.
 /// </summary>
 public class TlvElement
 {
-    /// <summary>
-    /// Gets the tag (identifier).
-    /// </summary>
-    public TlvTag Tag { get; }
+    private const string MagicNumber = "NIVR";
 
     /// <summary>
-    /// Gets the value as byte array.
-    /// </summary>
-    public byte[] Value { get; }
-
-    /// <summary>
-    /// Initializes a new TLV element.
+    ///     Initializes a new TLV element.
     /// </summary>
     /// <param name="tag">The tag (identifier).</param>
     /// <param name="value">The value as byte array.</param>
@@ -260,36 +238,68 @@ public class TlvElement
         Value = value ?? throw new ArgumentNullException(nameof(value));
     }
 
-    private const string MagicNumber = "NIVR";
+    /// <summary>
+    ///     Gets the tag (identifier).
+    /// </summary>
+    public TlvTag Tag { get; }
+
+    /// <summary>
+    ///     Gets the value as byte array.
+    /// </summary>
+    public byte[] Value { get; }
+
     public static TlvElement Magic => new(TlvTag.Magic, Encoding.UTF8.GetBytes(MagicNumber));
     public static TlvElement Version => new(TlvTag.Version, VaultVersion.Current.ToBytes());
-    public static TlvElement Salt => new(TlvTag.Salt, Nivora.Core.Models.Salt.Generate().Bytes);
+    public static TlvElement Salt => new(TlvTag.Salt, Models.Salt.Generate().Bytes);
 
-    public static TlvElement SaltFromBytes(byte[] saltBytes) =>
-        new(TlvTag.Salt, saltBytes ?? throw new ArgumentNullException(nameof(saltBytes)));
+    public static TlvElement SaltFromBytes(byte[] saltBytes)
+    {
+        return new TlvElement(TlvTag.Salt, saltBytes ?? throw new ArgumentNullException(nameof(saltBytes)));
+    }
 
-    public static TlvElement Argon2Memory(int memory) => new(TlvTag.Argon2Memory, BitConverter.GetBytes(memory));
+    public static TlvElement Argon2Memory(int memory)
+    {
+        return new TlvElement(TlvTag.Argon2Memory, BitConverter.GetBytes(memory));
+    }
 
-    public static TlvElement Argon2Iterations(int iterations) =>
-        new(TlvTag.Argon2Iterations, BitConverter.GetBytes(iterations));
+    public static TlvElement Argon2Iterations(int iterations)
+    {
+        return new TlvElement(TlvTag.Argon2Iterations, BitConverter.GetBytes(iterations));
+    }
 
-    public static TlvElement Argon2Parallelism(int parallelism) =>
-        new(TlvTag.Argon2Parallelism, BitConverter.GetBytes(parallelism));
+    public static TlvElement Argon2Parallelism(int parallelism)
+    {
+        return new TlvElement(TlvTag.Argon2Parallelism, BitConverter.GetBytes(parallelism));
+    }
 
-    public static TlvElement Iv(byte[] iv) => new(TlvTag.Iv, iv ?? throw new ArgumentNullException(nameof(iv)));
+    public static TlvElement Iv(byte[] iv)
+    {
+        return new TlvElement(TlvTag.Iv, iv ?? throw new ArgumentNullException(nameof(iv)));
+    }
 
-    public static TlvElement Content(byte[] content) =>
-        new(TlvTag.Content, content ?? throw new ArgumentNullException(nameof(content)));
+    public static TlvElement Content(byte[] content)
+    {
+        return new TlvElement(TlvTag.Content, content ?? throw new ArgumentNullException(nameof(content)));
+    }
 }
 
 public record TlvTag
 {
-    public byte Value { get; }
-
     private TlvTag(byte Value)
     {
         this.Value = Value;
     }
+
+    public byte Value { get; }
+
+    public static TlvTag Magic => new(0x01);
+    public static TlvTag Version => new(0x02);
+    public static TlvTag Salt => new(0x03);
+    public static TlvTag Argon2Memory => new(0x04);
+    public static TlvTag Argon2Iterations => new(0x05);
+    public static TlvTag Argon2Parallelism => new(0x06);
+    public static TlvTag Iv => new(0x07);
+    public static TlvTag Content => new(0x08);
 
     internal static TlvTag FromByte(byte value)
     {
@@ -306,13 +316,4 @@ public record TlvTag
             _ => throw new InvalidDataException($"Unknown TLV tag: {value}")
         };
     }
-
-    public static TlvTag Magic => new(0x01);
-    public static TlvTag Version => new(0x02);
-    public static TlvTag Salt => new(0x03);
-    public static TlvTag Argon2Memory => new(0x04);
-    public static TlvTag Argon2Iterations => new(0x05);
-    public static TlvTag Argon2Parallelism => new(0x06);
-    public static TlvTag Iv => new(0x07);
-    public static TlvTag Content => new(0x08);
 }

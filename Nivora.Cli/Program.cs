@@ -1,17 +1,14 @@
 ﻿using CliFx;
 using Microsoft.Extensions.DependencyInjection;
-using Nivora.Cli.Commands;
-using Nivora.Core;
-using Nivora.Core.Database;
 using Nivora.Core.Extensions;
-using Nivora.Core.Models;
 
 namespace Nivora.Cli;
 
-class Program
+internal class Program
 {
     private static readonly CancellationTokenSource Cts = new();
-    static async Task<int> Main(string[] args)
+
+    private static async Task<int> Main(string[] args)
     {
         var cliApp = new CliApplicationBuilder()
             .AddCommandsFromThisAssembly()
@@ -23,9 +20,9 @@ class Program
                 var services = new ServiceCollection().AddCoreServices();
 
                 // Register services
-                
+
                 // 
-                
+
                 // Register commands
                 foreach (var commandType in commandTypes)
                     services.AddTransient(commandType);

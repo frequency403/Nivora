@@ -4,13 +4,24 @@ namespace Nivora.Core.Database.Models;
 
 public record Secret
 {
+    internal const string CreateTableSql = """
+                                           CREATE TABLE IF NOT EXISTS Secrets (
+                                           Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                           Name TEXT NOT NULL UNIQUE,
+                                           Iv BLOB NOT NULL,
+                                           Value BLOB NOT NULL,
+                                           CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                           UpdatedAt DATETIME
+                                           );
+                                           """;
+
     public int Id { get; set; } = 0;
     public string Name { get; set; } = string.Empty;
     public byte[] Iv { get; set; } = [];
     public byte[] Value { get; set; } = [];
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; } = null;
-    
+
     public static async Task<Secret> CreateFromPlaintext(string name, string value, string masterPassword)
     {
         if (string.IsNullOrEmpty(name))
@@ -28,15 +39,4 @@ public record Secret
             Iv = iv
         };
     }
-    
-    internal const string CreateTableSql = """
-                                           CREATE TABLE IF NOT EXISTS Secrets (
-                                           Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                           Name TEXT NOT NULL UNIQUE,
-                                           Iv BLOB NOT NULL,
-                                           Value BLOB NOT NULL,
-                                           CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-                                           UpdatedAt DATETIME
-                                           );
-                                           """;
 }

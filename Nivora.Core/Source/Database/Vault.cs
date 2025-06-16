@@ -14,17 +14,29 @@ public class Vault : IDisposable, IAsyncDisposable
     private const string DefaultVaultName = "vault";
     private const string MagicNumber = "NIVR";
 
-    public required string Path { get; init; }
-    public required VaultVersion Version { get; init; }
-    public required SqliteConnection Connection { private get; init; }
-
     private Vault()
     {
     }
 
-    public async Task<Secret?> GetSecret(string name) =>
-        await Connection.QuerySingleOrDefaultAsync<Secret>("SELECT * FROM Secrets WHERE Name = @Name",
+    public required string Path { get; init; }
+    public required VaultVersion Version { get; init; }
+    public required SqliteConnection Connection { private get; init; }
+
+    public async ValueTask DisposeAsync()
+    {
+        await Connection.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        Connection.Dispose();
+    }
+
+    public async Task<Secret?> GetSecret(string name)
+    {
+        return await Connection.QuerySingleOrDefaultAsync<Secret>("SELECT * FROM Secrets WHERE Name = @Name",
             new { Name = name });
+    }
 
     public async Task<Secret?> AddSecret(Secret secret)
     {
@@ -63,7 +75,7 @@ public class Vault : IDisposable, IAsyncDisposable
         var decryptedFileBytes = Aes256.Decrypt(await File.ReadAllBytesAsync(fileInfo.FullName, token), filePathBytes,
             filePathIv);
         await using var fileStream = new MemoryStream(decryptedFileBytes);
-        await using var tlvStream = new TlvStream(fileStream, true);
+        await using var tlvStream = new TlvStream(fileStream);
         var parameters = await VaultParameters.ReadFromTlvStream(tlvStream, token);
 
         var derivedKey = await Argon2Hash.HashBytes(password, parameters.Argon2Iterations, parameters.Argon2Memory,
@@ -101,10 +113,7 @@ public class Vault : IDisposable, IAsyncDisposable
     {
         var fileInfo = new FileInfo(path);
         VaultFileExistsException.ThrowIfExists(fileInfo);
-        if (!fileInfo.Directory?.Exists ?? true)
-        {
-            fileInfo.Directory?.Create();
-        }
+        if (!fileInfo.Directory?.Exists ?? true) fileInfo.Directory?.Create();
 
         var parameters = VaultParameters.Default;
 
@@ -141,8 +150,9 @@ public class Vault : IDisposable, IAsyncDisposable
 
         return await OpenVault(fileInfo.FullName, password, token);
     }
-    
-    private static async Task<Stream> WriteDatabaseToFile(SqliteConnection databaseConnection, CancellationToken token = default)
+
+    private static async Task<Stream> WriteDatabaseToFile(SqliteConnection databaseConnection,
+        CancellationToken token = default)
     {
         var tempFileStream = new TempFileStream();
         // Backup the in-memory database to a file
@@ -155,8 +165,8 @@ public class Vault : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Shuffles the input bytes in the pattern 0, N-1, 1, N-2, ... up to a maximum of <paramref name="size"/> elements.
-    /// If the input is shorter than <paramref name="size"/>, uses only as many as are available.
+    ///     Shuffles the input bytes in the pattern 0, N-1, 1, N-2, ... up to a maximum of <paramref name="size" /> elements.
+    ///     If the input is shorter than <paramref name="size" />, uses only as many as are available.
     /// </summary>
     /// <param name="input">The input byte array to be permuted.</param>
     /// <param name="size">Maximum number of bytes to output.</param>
@@ -171,16 +181,10 @@ public class Vault : IDisposable, IAsyncDisposable
         while (index < result.Length && left <= right)
         {
             // Add from left
-            if (index < result.Length)
-            {
-                result[index++] = input[left++];
-            }
+            if (index < result.Length) result[index++] = input[left++];
 
             // Add from right
-            if (index < result.Length && left <= right)
-            {
-                result[index++] = input[right--];
-            }
+            if (index < result.Length && left <= right) result[index++] = input[right--];
         }
 
         return result;
@@ -215,15 +219,8 @@ public class Vault : IDisposable, IAsyncDisposable
     }
 
     public static Task<Vault?> OpenExisting(string password, string? vaultName = null,
-        CancellationToken token = default) => OpenVault(GetVaultPath(vaultName), password, token);
-
-    public void Dispose()
+        CancellationToken token = default)
     {
-        Connection.Dispose();
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        await Connection.DisposeAsync();
+        return OpenVault(GetVaultPath(vaultName), password, token);
     }
 }

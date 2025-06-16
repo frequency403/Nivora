@@ -9,11 +9,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Nivora.Core\Nivora.Core.csproj" />
+        <ProjectReference Include="..\Nivora.Core\Nivora.Core.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="CliFx" Version="2.3.6" />
+        <PackageReference Include="CliFx" Version="2.3.6"/>
     </ItemGroup>
 
 </Project>
