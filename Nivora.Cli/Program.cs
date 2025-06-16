@@ -1,5 +1,9 @@
-﻿using Nivora.Core;
+﻿using CliFx;
+using Microsoft.Extensions.DependencyInjection;
+using Nivora.Cli.Commands;
+using Nivora.Core;
 using Nivora.Core.Database;
+using Nivora.Core.Extensions;
 using Nivora.Core.Models;
 
 namespace Nivora.Cli;
@@ -7,26 +11,28 @@ namespace Nivora.Cli;
 class Program
 {
     private static readonly CancellationTokenSource Cts = new();
-    static async Task Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
-        Cts.Token.Register(() =>
-        {
-            Console.WriteLine("Exiting...");
-        });
-        Console.CancelKeyPress += (sender, eventArgs) =>
-        {
-            eventArgs.Cancel = true; // Prevent the process from terminating immediately
-            Cts.Cancel(); // Trigger cancellation
-        };
-        
-        var stopWatch = System.Diagnostics.Stopwatch.StartNew();
-        await using var vault = await Vault.CreateNew("yourmomghey", null, Cts.Token);
-        stopWatch.Stop();
-        
-        if (vault == null)
-        {
-            Console.WriteLine("Failed to create vault. Elapsed time: {0} s", stopWatch.Elapsed.TotalSeconds);
-        }
-        Console.WriteLine("Created {0} in {1} s",vault?.Version, stopWatch.Elapsed.TotalSeconds);
+        var cliApp = new CliApplicationBuilder()
+            .AddCommandsFromThisAssembly()
+            .SetExecutableName("Nivora CLI")
+            .SetDescription("Nivora CLI - A command line interface for Nivora, a secure vault for your secrets.")
+            .SetVersion("1.0.0")
+            .UseTypeActivator(commandTypes =>
+            {
+                var services = new ServiceCollection().AddCoreServices();
+
+                // Register services
+                
+                // 
+                
+                // Register commands
+                foreach (var commandType in commandTypes)
+                    services.AddTransient(commandType);
+
+                return services.BuildServiceProvider();
+            })
+            .Build();
+        return await cliApp.RunAsync(args);
     }
 }

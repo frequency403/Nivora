@@ -7,8 +7,6 @@ namespace Nivora.Core;
 
 public static class Argon2Hash
 {
-    
-    
     public static async Task<string> HashBase64(string password, int iterations = 3, int memory = 65536, int parallelism = 1, byte[]? salt = null) => Convert.ToBase64String(await HashCore(password, iterations, memory, parallelism, salt));
     public static Task<byte[]> HashBytes(string password, int iterations = 3, int memory = 65536, int parallelism = 1, byte[]? salt = null) => HashCore(password, iterations, memory, parallelism, salt);
     private static async Task<byte[]> HashCore(string password, int iterations, int memory, int parallelism, byte[]? salt)

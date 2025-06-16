@@ -2,6 +2,7 @@ using System.Text;
 using Dapper;
 using Microsoft.Data.Sqlite;
 using Nivora.Core.Database.Models;
+using Nivora.Core.Exceptions;
 using Nivora.Core.Models;
 using Nivora.Core.Streams;
 
@@ -99,9 +100,7 @@ public class Vault : IDisposable, IAsyncDisposable
     private static async Task<Vault?> CreateVault(string path, string password, CancellationToken token)
     {
         var fileInfo = new FileInfo(path);
-        if (fileInfo.Exists)
-            throw new InvalidOperationException(
-                "Vault file already exists. Please choose a different path or delete the existing file.");
+        VaultFileExistsException.ThrowIfExists(fileInfo);
         if (!fileInfo.Directory?.Exists ?? true)
         {
             fileInfo.Directory?.Create();
