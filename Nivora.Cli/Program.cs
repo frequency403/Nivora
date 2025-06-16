@@ -1,5 +1,8 @@
 ﻿using CliFx;
+using DryIoc;
+using DryIoc.Microsoft.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
+using Nivora.Core.Container;
 using Nivora.Core.Extensions;
 
 namespace Nivora.Cli;
@@ -17,17 +20,11 @@ internal class Program
             .SetVersion("1.0.0")
             .UseTypeActivator(commandTypes =>
             {
-                var services = new ServiceCollection().AddCoreServices();
-
-                // Register services
-
-                // 
-
-                // Register commands
-                foreach (var commandType in commandTypes)
-                    services.AddTransient(commandType);
-
-                return services.BuildServiceProvider();
+                var services = NivoraContainer.Initialize();
+                foreach (var type in commandTypes) 
+                    services.AddTransient(type);
+                
+                return NivoraContainer.Build(services);
             })
             .Build();
         return await cliApp.RunAsync(args);

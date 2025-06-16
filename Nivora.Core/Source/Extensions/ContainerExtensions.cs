@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Nivora.Core.Factory;
+using Nivora.Core.Interfaces;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
@@ -15,18 +17,17 @@ public static class ContainerExtensions
         };
 
         // Register core services here
-        services.AddLogging(builder =>
-        {
-            builder.AddSerilog(new LoggerConfiguration()
-                .MinimumLevel.ControlledBy(logLevelSwitch)
-                .WriteTo.Console()
-                .WriteTo.File("logs/nivora.log", rollingInterval: RollingInterval.Day)
-                .Enrich.FromLogContext()
-                .Enrich.WithProperty("Application", "Nivora")
-                .CreateLogger(), true);
-        });
-        services.AddSingleton(logLevelSwitch);
-
-        return services;
+        return services.AddLogging(builder =>
+            {
+                builder.AddSerilog(new LoggerConfiguration()
+                    .MinimumLevel.ControlledBy(logLevelSwitch)
+                    .WriteTo.Console()
+                    .WriteTo.File("logs/nivora.log", rollingInterval: RollingInterval.Day)
+                    .Enrich.FromLogContext()
+                    .Enrich.WithProperty("Application", "Nivora")
+                    .CreateLogger(), true);
+            })
+            .AddSingleton(logLevelSwitch)
+            .AddSingleton<IVaultFactory, VaultFactory>();
     }
 }
