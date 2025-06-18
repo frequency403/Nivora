@@ -24,18 +24,18 @@ public static class Argon2Hash
     {
         if (string.IsNullOrEmpty(password))
             throw new ArgumentException("Password cannot be null or empty.", nameof(password));
-
+        salt ??= Salt.Generate().Bytes;
         var generator = new Argon2BytesGenerator();
         var parameters = new Argon2Parameters.Builder()
             .WithMemoryAsKB(memory)
             .WithIterations(iterations)
             .WithParallelism(parallelism)
-            .WithSalt(salt ?? Salt.Generate().Bytes)
+            .WithSalt(salt)
             .WithVersion(Argon2Parameters.Version13)
             .Build();
         generator.Init(parameters);
         var hash = new byte[32]; // 256 bits
-        var passwordBytes = Encoding.UTF8.GetBytes(password);
+        var passwordBytes = Encoding.UTF8.GetBytes(string.Join('.', Convert.ToBase64String(salt), password));
         await Task.Run(() => generator.GenerateBytes(passwordBytes, hash));
         return hash;
     }

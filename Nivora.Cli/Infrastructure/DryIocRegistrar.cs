@@ -1,7 +1,7 @@
 using DryIoc;
 using Spectre.Console.Cli;
 
-namespace Nivora.Cli.Commands.Infrastructure;
+namespace Nivora.Cli.Infrastructure;
 
 public class DryIocRegistrar(IContainer? container) : ITypeRegistrar
 {

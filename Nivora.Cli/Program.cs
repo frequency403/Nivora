@@ -1,5 +1,5 @@
 ﻿using Nivora.Cli.Commands;
-using Nivora.Cli.Commands.Infrastructure;
+using Nivora.Cli.Infrastructure;
 using Nivora.Core.Container;
 using Spectre.Console.Cli;
 
@@ -11,7 +11,7 @@ internal class Program
 
     private static async Task<int> Main(string[] args)
     {
-        var app = new CommandApp(new DryIocRegistrar(NivoraContainer.CreateDryIocContainer()));
+        var app = new CommandApp<UseCommand>(new DryIocRegistrar(NivoraContainer.CreateDryIocContainer()));
         app.Configure(config =>
         {
             config.AddCommand<ListVaultsCommand>("list")

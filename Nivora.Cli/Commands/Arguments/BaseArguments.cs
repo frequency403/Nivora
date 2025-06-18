@@ -1,12 +1,16 @@
+using System.ComponentModel;
 using Spectre.Console.Cli;
 
 namespace Nivora.Cli.Commands.Arguments;
 
 public class BaseArguments : CommandSettings
 {
+    [Description("The name of the vault to use. If not specified, the default vault will be used.")]
     [CommandOption("-v|--vault <vault>")]
+    [DefaultValue("vault")]
     public string? VaultName { get; set; }
     
-    [CommandArgument(0, "[Password]")]
+    [Description("The master password for the vault. If not specified, the user will be prompted to enter it.")]
+    [CommandOption("-p|--password <Password>")]
     public string Password { get; set; }
 }

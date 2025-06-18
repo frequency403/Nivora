@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <RunAOTCompilation>true</RunAOTCompilation>
         <PublishAot>true</PublishAot>
+        <InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Dapper.AOT</InterceptorsPreviewNamespaces>
     </PropertyGroup>
 
     <ItemGroup>

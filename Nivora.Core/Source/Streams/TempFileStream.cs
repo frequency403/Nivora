@@ -37,6 +37,11 @@ public class TempFileStream : Stream
         return _fileStream.ReadAsync(buffer, offset, count, cancellationToken);
     }
 
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = new CancellationToken())
+    {
+        return _fileStream.ReadAsync(buffer, cancellationToken);
+    }
+
     public override long Seek(long offset, SeekOrigin origin)
     {
         return _fileStream.Seek(offset, origin);
@@ -55,6 +60,11 @@ public class TempFileStream : Stream
     public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
         return _fileStream.WriteAsync(buffer, offset, count, cancellationToken);
+    }
+    
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = new CancellationToken())
+    {
+        return _fileStream.WriteAsync(buffer, cancellationToken);
     }
 
 
