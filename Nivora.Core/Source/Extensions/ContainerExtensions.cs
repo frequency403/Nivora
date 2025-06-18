@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+using DryIoc;
 using Nivora.Core.Factory;
 using Nivora.Core.Interfaces;
 using Serilog;
@@ -9,8 +9,9 @@ namespace Nivora.Core.Extensions;
 
 public static class ContainerExtensions
 {
-    public static IServiceCollection AddCoreServices(this IServiceCollection services)
+    public static IContainer AddCoreServices(this IContainer container)
     {
+        ArgumentNullException.ThrowIfNull(container);
 #if DEBUG
         var consoleLogLevelSwitch = new LoggingLevelSwitch
         {
@@ -19,28 +20,28 @@ public static class ContainerExtensions
 #endif
         var fileLogLevelSwitch = new LoggingLevelSwitch
         {
-            MinimumLevel = LogEventLevel.Information // Default file log level
+            MinimumLevel = LogEventLevel.Verbose // Default file log level
         };
         var logFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nivora", "logs");
         if (!Directory.Exists(logFilePath)) Directory.CreateDirectory(logFilePath);
         // Register core services here
-        return services.AddLogging(builder =>
-            {
-                builder.AddSerilog(new LoggerConfiguration()
+        
+        container.RegisterInstance<ILogger>(new LoggerConfiguration()
 #if DEBUG
-                    .MinimumLevel.ControlledBy(consoleLogLevelSwitch)
-                    .WriteTo.Console(levelSwitch: consoleLogLevelSwitch)
+            .MinimumLevel.ControlledBy(consoleLogLevelSwitch)
+            .WriteTo.Console(levelSwitch: consoleLogLevelSwitch)
 #endif
-                    .WriteTo.File(Path.Combine(logFilePath, "nivora.log"), rollingInterval: RollingInterval.Day,
-                        levelSwitch: fileLogLevelSwitch)
-                    .Enrich.FromLogContext()
-                    .Enrich.WithProperty("Application", "Nivora")
-                    .CreateLogger(), true);
-            })
+            .WriteTo.File(Path.Combine(logFilePath, "nivora.log"), rollingInterval: RollingInterval.Day,
+                levelSwitch: fileLogLevelSwitch)
+            .Enrich.FromLogContext()
+            .Enrich.WithProperty("Application", "Nivora")
+            .CreateLogger());
+            
 #if DEBUG
-            .AddKeyedSingleton("ConsoleLogLevelSwitch", consoleLogLevelSwitch)
+            container.RegisterInstance(consoleLogLevelSwitch, serviceKey:"ConsoleLogLevelSwitch");
 #endif
-            .AddKeyedSingleton("FileLogLevelSwitch", fileLogLevelSwitch)
-            .AddSingleton<IVaultFactory, VaultFactory>();
+                container.RegisterInstance(fileLogLevelSwitch, serviceKey: "FileLogLevelSwitch");
+            container.Register<IVaultFactory, VaultFactory>(reuse: Reuse.Singleton);
+        return container;
     }
 }

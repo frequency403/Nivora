@@ -1,9 +1,7 @@
-﻿using CliFx;
-using DryIoc;
-using DryIoc.Microsoft.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Nivora.Cli.Commands;
+using Nivora.Cli.Commands.Infrastructure;
 using Nivora.Core.Container;
-using Nivora.Core.Extensions;
+using Spectre.Console.Cli;
 
 namespace Nivora.Cli;
 
@@ -13,20 +11,18 @@ internal class Program
 
     private static async Task<int> Main(string[] args)
     {
-        var cliApp = new CliApplicationBuilder()
-            .AddCommandsFromThisAssembly()
-            .SetExecutableName("Nivora CLI")
-            .SetDescription("Nivora CLI - A command line interface for Nivora, a secure vault for your secrets.")
-            .SetVersion("1.0.0")
-            .UseTypeActivator(commandTypes =>
-            {
-                var services = NivoraContainer.Initialize();
-                foreach (var type in commandTypes) 
-                    services.AddTransient(type);
-                
-                return NivoraContainer.Build(services);
-            })
-            .Build();
-        return await cliApp.RunAsync(args);
+        var app = new CommandApp(new DryIocRegistrar(NivoraContainer.CreateDryIocContainer()));
+        app.Configure(config =>
+        {
+            config.AddCommand<ListVaultsCommand>("list")
+                .WithDescription("Lists all available vaults.")
+                .WithExample("list");
+            config.AddCommand<InitCommand>("init")
+                .WithDescription("Initializes the Nivora vault with a password.")
+                .WithExample("init", "-p", "your_password")
+                .WithExample("init", "-p", "your_password", "--vaultName", "MyVault");
+        });
+        
+        return await app.RunAsync(args);
     }
 }

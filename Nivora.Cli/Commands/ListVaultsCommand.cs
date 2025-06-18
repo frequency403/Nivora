@@ -1,37 +1,37 @@
-using CliFx;
-using CliFx.Attributes;
-using CliFx.Infrastructure;
-using Microsoft.Extensions.Logging;
+using Serilog;
+using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace Nivora.Cli.Commands;
-[Command("list-vaults", Description = "Lists all available vaults.")]
-public class ListVaultsCommand(ILogger<ListVaultsCommand> logger) : ICommand
+public class ListVaultsCommand(ILogger logger) : Command
 {
-    public static async Task<FileInfo[]> GetVaultFiles(IConsole console, string path)
+    private static FileInfo[] GetVaultFiles(string path)
     {
         var directory = new DirectoryInfo(path);
         if (!directory.Exists)
         {
-            await console.Output.WriteLineAsync("No vaults found.");
+            AnsiConsole.WriteLine("No vaults found.");
             return [];
         }
-        await console.Output.WriteLineAsync("Listing available vaults...");
+        AnsiConsole.WriteLine("Listing available vaults...");
         return directory.GetFiles("*.niv");
     }
     
-    public async ValueTask ExecuteAsync(IConsole console)
+
+    public override int Execute(CommandContext context)
     {
         var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nivora");
         
-        var vaultFiles = await GetVaultFiles(console, path);
+        var vaultFiles = GetVaultFiles(path);
         if (vaultFiles.Length == 0)
         {
-            logger.LogInformation("No vaults found in the directory '{Path}'.", path);
-            await console.Output.WriteLineAsync("No vaults found.");
-            return;
+            logger.Information("No vaults found in the directory '{Path}'.", path);
+            
+            AnsiConsole.WriteLine("No vaults found.");
+            return 0;
         }
-        logger.LogInformation("Available vaults in '{Path}':", path);
-        await console.Output.WriteLineAsync($"Available vaults in '{path}':");
+        logger.Information("Available vaults in '{Path}':", path);
+        AnsiConsole.WriteLine($"Available vaults in '{path}':");
         
         const int width = 3;
         foreach (var file in vaultFiles.Select((info, i) => new { Info = info, Index = i }))
@@ -40,8 +40,9 @@ public class ListVaultsCommand(ILogger<ListVaultsCommand> logger) : ICommand
             var pad = width - indexStr.Length;
             var padLeft = pad / 2 + indexStr.Length;
             var centered = indexStr.PadLeft(padLeft).PadRight(width);
-            await console.Output.WriteLineAsync($"- [{centered}] {file.Info.Name} (Last modified: {file.Info.LastWriteTime})");
+            AnsiConsole.WriteLine($"- [{centered}] {file.Info.Name} (Last modified: {file.Info.LastWriteTime})");
         }
-        
+
+        return 0;
     }
 }

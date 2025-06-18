@@ -1,63 +1,60 @@
 using System.Diagnostics;
-using CliFx;
-using CliFx.Attributes;
-using CliFx.Infrastructure;
-using Microsoft.Extensions.Logging;
+using Nivora.Cli.Commands.Arguments;
 using Nivora.Core.Database;
 using Nivora.Core.Exceptions;
+using Serilog;
+using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace Nivora.Cli.Commands;
 
-[Command("init", Description = "Initializes a new vault.")]
-public class InitCommand(ILogger<InitCommand> logger) : ICommand
+public class InitCommand(ILogger logger) : AsyncCommand<BaseArguments>
 {
-    [CommandOption("vault-name", 'n', Description = "The name of the vault file.", IsRequired = false)]
-    public string? VaultName { get; set; } = "vault";
-
-    [CommandOption("password", 'p', Description = "The master password for the vault.", IsRequired = true)]
-    public string? Password { get; set; } = null;
-
-    public async ValueTask ExecuteAsync(IConsole console)
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+    public override async Task<int> ExecuteAsync(CommandContext context, BaseArguments arguments)
     {
-        var cancellationToken = console.RegisterCancellationHandler();
+        var cancellationToken = _cancellationTokenSource.Token;
 
-        if (string.IsNullOrEmpty(VaultName))
+        if (string.IsNullOrEmpty(arguments.VaultName))
         {
-            logger.LogError("Vault name cannot be null or empty.");
-            return;
+            logger.Error("Vault name cannot be null or empty.");
+            return 1;
         }
 
-        if (string.IsNullOrEmpty(Password))
+        if (string.IsNullOrEmpty(arguments.Password))
         {
-            logger.LogError("Master password cannot be null or empty.");
-            return;
+            logger.Error("Master password cannot be null or empty.");
+            return 1;
         }
 
-        logger.LogInformation("Initializing vault '{VaultName}'...", VaultName);
+        logger.Information("Initializing vault '{VaultName}'...", arguments.VaultName);
+        AnsiConsole.WriteLine("Initializing vault '{0}'...", arguments.VaultName);
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            await using var vault = await Vault.CreateNew(Password, VaultName, cancellationToken);
+            await using var vault = await Vault.CreateNew(arguments.Password, arguments.VaultName, cancellationToken);
             stopwatch.Stop();
             if (vault == null)
             {
-                logger.LogError("Failed to create vault. Elapsed time: {ElapsedTime} s",
+                logger.Error("Failed to create vault. Elapsed time: {ElapsedTime} s",
                     stopwatch.Elapsed.TotalSeconds);
-                return;
+                return 1;
             }
 
-            logger.LogInformation("Created vault '{VaultName}' with version {Version} in {ElapsedTime} s",
+            logger.Information("Created vault '{VaultName}' with version {Version} in {ElapsedTime} s",
                 vault.Path, vault.Version, stopwatch.Elapsed.TotalSeconds);
         }
         catch (VaultFileExistsException ex)
         {
-            logger.LogError(ex,
+            logger.Error(ex,
                 "Vault file '{VaultName}' already exists. Please choose a different name or delete the existing file.",
-                VaultName);
+                arguments.VaultName);
         }
         catch (Exception e)
         {
-            logger.LogError(e, "Failed to create vault '{VaultName}'", VaultName);
+            logger.Error(e, "Failed to create vault '{VaultName}'", arguments.VaultName);
         }
+
+        return 0;
     }
 }

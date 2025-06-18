@@ -13,7 +13,15 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="CliFx" Version="2.3.6"/>
+        <PackageReference Include="Spectre.Console" Version="0.50.0" />
+        <PackageReference Include="Spectre.Console.Analyzer" Version="1.0.0">
+          <PrivateAssets>all</PrivateAssets>
+          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Spectre.Console.Cli" Version="0.50.0" />
+        <PackageReference Include="Spectre.Console.Cli.Extensions.DependencyInjection" Version="0.9.0" />
+        <PackageReference Include="Spectre.Console.Extensions.Progress" Version="1.0.0" />
+        <PackageReference Include="Spectre.Console.Extensions.Table" Version="1.0.0" />
     </ItemGroup>
 
 </Project>

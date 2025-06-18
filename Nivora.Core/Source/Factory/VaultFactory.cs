@@ -1,10 +1,10 @@
-using Microsoft.Extensions.Logging;
 using Nivora.Core.Database;
 using Nivora.Core.Interfaces;
+using Serilog;
 
 namespace Nivora.Core.Factory;
 
-public class VaultFactory(ILogger<VaultFactory> logger) : IVaultFactory
+public class VaultFactory(ILogger logger) : IVaultFactory
 {
     public Task<Vault?> CreateAsync(string password, string? vaultName, CancellationToken cancellationToken = default)
     {

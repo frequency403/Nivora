@@ -1,20 +1,13 @@
-using System.Diagnostics.CodeAnalysis;
-using DryIoc.Microsoft.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection;
+using DryIoc;
 using Nivora.Core.Extensions;
 
 namespace Nivora.Core.Container;
 
 public static class NivoraContainer
 {
-    public static IServiceCollection Initialize()
+    public static IContainer CreateDryIocContainer()
     {
-        return new ServiceCollection().AddCoreServices();
+        return new DryIoc.Container().AddCoreServices();
     }
     
-    public static IServiceProvider Build(IServiceCollection services)
-    {
-        var container = new DryIoc.Container();
-        return container.WithDependencyInjectionAdapter(services).BuildServiceProvider();
-    }
 }
