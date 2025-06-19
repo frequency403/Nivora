@@ -132,7 +132,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
         var tag = TlvTag.FromByte((byte)tagByte);
 
         var lengthBytes = new byte[4];
-        var readLen = await Stream.ReadAsync(lengthBytes, 0, 4, cancellationToken).ConfigureAwait(false);
+        var readLen = await Stream.ReadAsync(lengthBytes.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
         if (readLen != 4)
             throw new EndOfStreamException("Unexpected end of stream while reading TLV length.");
 
@@ -147,7 +147,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
         var read = 0;
         while (read < length)
         {
-            var r = await Stream.ReadAsync(value, read, length - read, cancellationToken).ConfigureAwait(false);
+            var r = await Stream.ReadAsync(value.AsMemory(read, length - read), cancellationToken).ConfigureAwait(false);
             if (r == 0)
                 throw new EndOfStreamException("Unexpected end of stream while reading TLV value.");
             read += r;

@@ -1,11 +1,13 @@
 using System.Net;
 using Dapper;
 using System.Text;
+using DryIoc.ImTools;
 using Microsoft.Data.Sqlite;
 using Nivora.Core.Database.Models;
 using Nivora.Core.Exceptions;
 using Nivora.Core.Models;
 using Nivora.Core.Streams;
+using Serilog;
 
 [module:DapperAot]
 
@@ -16,12 +18,18 @@ namespace Nivora.Core.Database
     /// </summary>
     public class Vault : IDisposable, IAsyncDisposable
     {
-        private const string DefaultVaultExtension = "niv";
-        private const string DefaultVaultName = "vault";
-        private SqliteConnection _connection;
+        private readonly ILogger _logger;
+        private VaultParameters Parameters { get; init; }
+
+        internal static Vault Empty(ILogger logger) => new(logger);
+        
+        private byte[] DerivedKey { get; set; }
 
         // Hide default constructor for controlled initialization
-        private Vault() { }
+        private Vault(ILogger logger)
+        {
+            _logger = logger;
+        }
 
         public string Name => System.IO.Path.GetFileNameWithoutExtension(Path);
         
@@ -33,23 +41,19 @@ namespace Nivora.Core.Database
         /// <summary>
         /// The version of the vault.
         /// </summary>
-        public VaultVersion Version { get; private set; }
+        public VaultVersion Version => Parameters.Version;
 
         /// <summary>
         /// The SQLite connection to the vault database.
         /// </summary>
-        public SqliteConnection Connection
-        {
-            get => _connection;
-            private set => _connection = value;
-        }
+        public SqliteConnection Connection { get; private set; }
 
         /// <summary>
         /// Asynchronously disposes the vault and its database connection.
         /// </summary>
         public async ValueTask DisposeAsync()
         {
-            await _connection.DisposeAsync().ConfigureAwait(false);
+            await Connection.DisposeAsync();
         }
 
         /// <summary>
@@ -57,19 +61,29 @@ namespace Nivora.Core.Database
         /// </summary>
         public void Dispose()
         {
-            _connection.Dispose();
+            Connection.Dispose();
         }
 
+        
+        
         /// <summary>
         /// Retrieves a secret by name.
         /// </summary>
         /// <param name="name">The name of the secret.</param>
         /// <returns>The secret if found, otherwise null.</returns>
-        public async Task<Secret?> GetSecret(string name)
+        public async Task<Secret?> GetSecretAsync(string name)
         {
-            return await _connection.QuerySingleOrDefaultAsync<Secret>(
+            return await Connection.QuerySingleOrDefaultAsync<Secret>(
                 "SELECT * FROM Secrets WHERE Name = @Name",
-                new { Name = name }).ConfigureAwait(false);
+                new { Name = name });
+        }
+        
+        public async IAsyncEnumerable<Secret> GetAllSecretsAsync()
+        {
+            await foreach (var secret in Connection.QueryUnbufferedAsync<Secret>("SELECT * FROM Secrets"))
+            {
+                yield return secret;
+            }
         }
 
         /// <summary>
@@ -77,13 +91,14 @@ namespace Nivora.Core.Database
         /// </summary>
         /// <param name="secret">The secret to add.</param>
         /// <returns>The added secret if successful, otherwise null.</returns>
-        public async Task<Secret?> AddSecret(Secret secret)
+        public async Task<Secret?> AddSecretAsync(Secret secret, CancellationToken cancellationToken = default)
         {
-            var rowsAffected = await _connection.ExecuteAsync(
+            var rowsAffected = await Connection.ExecuteAsync(
                 "INSERT INTO Secrets (Name, Iv, Value) VALUES (@Name, @Iv, @Value)",
-                secret).ConfigureAwait(false) > 0;
-            if (rowsAffected)
-                return await GetSecret(secret.Name).ConfigureAwait(false);
+                secret) > 0;
+            var saveSuccessful = await SaveChangesAsync(cancellationToken);
+            if (rowsAffected && saveSuccessful)
+                return await GetSecretAsync(secret.Name);
             return null;
         }
 
@@ -92,13 +107,14 @@ namespace Nivora.Core.Database
         /// </summary>
         /// <param name="secret">The secret to update.</param>
         /// <returns>The updated secret if successful, otherwise null.</returns>
-        public async Task<Secret?> UpdateSecret(Secret secret)
+        public async Task<Secret?> UpdateSecretAsync(Secret secret, CancellationToken cancellationToken = default)
         {
-            var rowsAffected = await _connection.ExecuteAsync(
+            var rowsAffected = await Connection.ExecuteAsync(
                 "UPDATE Secrets SET Iv = @Iv, Value = @Value, UpdatedAt = CURRENT_TIMESTAMP WHERE Name = @Name",
-                secret).ConfigureAwait(false) > 0;
-            if (rowsAffected)
-                return await GetSecret(secret.Name).ConfigureAwait(false);
+                secret) > 0;
+            var saveSuccessful = await SaveChangesAsync(cancellationToken);
+            if (rowsAffected && saveSuccessful)
+                return await GetSecretAsync(secret.Name);
             return null;
         }
 
@@ -107,13 +123,61 @@ namespace Nivora.Core.Database
         /// </summary>
         /// <param name="name">The name of the secret to delete.</param>
         /// <returns>True if the secret was deleted, otherwise false.</returns>
-        public async Task<bool> DeleteSecret(string name)
+        public async Task<bool> DeleteSecretAsync(string name, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(name))
                 throw new ArgumentException("Name cannot be null or empty.", nameof(name));
-            return await _connection.ExecuteAsync(
+            var hasAffectedAnyRows = await Connection.ExecuteAsync(
                 "DELETE FROM Secrets WHERE Name = @Name",
-                new { Name = name }).ConfigureAwait(false) > 0;
+                new { Name = name }) > 0;
+            var saveSuccessful = await SaveChangesAsync(cancellationToken);
+            
+            return hasAffectedAnyRows && saveSuccessful;
+        }
+
+        private async Task<bool> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Connection.CloseAsync();
+                await using (var tempFileStream = await WriteDatabaseToFile(Connection, cancellationToken))
+                {
+                    await using var encryptionBufferStream = new MemoryStream();
+                    await Aes256.EncryptStream(
+                        tempFileStream, encryptionBufferStream,
+                        DerivedKey, Parameters.Iv, token: cancellationToken);
+                    encryptionBufferStream.Position = 0;
+                    Parameters.Content = encryptionBufferStream.ToArray();
+                }
+
+                Connection = await ReadBinaryDatabaseToMemory(Parameters.Content, cancellationToken);
+                await Connection.OpenAsync(cancellationToken);
+
+                await using (var tlvStream = await Parameters.WriteToTlvStream(cancellationToken))
+                {
+                    var filePathBytes = GetBytesFromFilePath(Path);
+                    var filePathIv = ShuffleBytes(filePathBytes, 16);
+                    using (var cryptoStream = new MemoryStream())
+                    {
+                        await Aes256.EncryptStream(tlvStream.Stream, cryptoStream, filePathBytes, filePathIv,
+                            token: cancellationToken);
+                        cryptoStream.Position = 0;
+                        
+                        await using (var fileStream =
+                                     new FileStream(Path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+                        {
+                            await cryptoStream.CopyToAsync(fileStream, cancellationToken);
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.Error(e, "Error while updating vault");
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -123,7 +187,7 @@ namespace Nivora.Core.Database
         /// <param name="password">The password to decrypt the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The opened Vault instance, or null if the file does not exist.</returns>
-        private static async Task<Vault> OpenVault(string path, string password, CancellationToken token)
+        private async Task<Vault> OpenVault(string path, string password, CancellationToken token)
         {
             var fileInfo = new FileInfo(path);
             if (!fileInfo.Exists)
@@ -140,9 +204,9 @@ namespace Nivora.Core.Database
             {
                 // Decrypt the file
                 await Aes256.DecryptStream(
-                    encryptedFileStream, decryptedFileStream, filePathBytes, filePathIv, token: token).ConfigureAwait(false);
+                    encryptedFileStream, decryptedFileStream, filePathBytes, filePathIv, token: token);
                 decryptedFileStream.Position = 0;
-                parameters = await VaultParameters.ReadFromTlvStream(tlvStream, token).ConfigureAwait(false);
+                parameters = await VaultParameters.ReadFromTlvStream(tlvStream, token);
             };
              
             var derivedKey = await Argon2Hash.HashBytes(
@@ -150,29 +214,18 @@ namespace Nivora.Core.Database
                 parameters.Argon2Iterations,
                 parameters.Argon2Memory,
                 parameters.Argon2Parallelism,
-                parameters.Salt).ConfigureAwait(false);
+                parameters.Salt);
 
             var decryptedContent = Aes256.Decrypt(parameters.Content, derivedKey, parameters.Iv);
-            var memoryDatabase = new SqliteConnection("Data Source=:memory:");
-            await memoryDatabase.OpenAsync(token).ConfigureAwait(false);
-
-            await using (var tempFileStream = new TempFileStream())
-            {
-                await tempFileStream.WriteAsync(decryptedContent, token).ConfigureAwait(false);
-                await using (var fileDatabase = new SqliteConnection($"Data Source={tempFileStream.Path};"))
-                {
-                    await fileDatabase.OpenAsync(token).ConfigureAwait(false);
-                    fileDatabase.BackupDatabase(memoryDatabase);
-                    await fileDatabase.CloseAsync().ConfigureAwait(false);
-                }
-            }
+            var memoryDatabase = await ReadBinaryDatabaseToMemory(decryptedContent, token);
                     
 
-            return new Vault
+            return new Vault(_logger)
             {
                 Path = fileInfo.FullName,
-                Version = parameters.Version,
-                Connection = memoryDatabase
+                Connection = memoryDatabase,
+                Parameters = parameters,
+                DerivedKey = derivedKey
             };
         }
 
@@ -183,7 +236,7 @@ namespace Nivora.Core.Database
         /// <param name="password">The password for the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The created Vault instance.</returns>
-        private static async Task<Vault> CreateVault(string path, string password, CancellationToken token)
+        private async Task<Vault> CreateVault(string path, string password, CancellationToken token)
         {
             var fileInfo = new FileInfo(path);
             VaultFileExistsException.ThrowIfExists(fileInfo);
@@ -193,16 +246,16 @@ namespace Nivora.Core.Database
             var parameters = VaultParameters.Default;
 
             await using var memoryDatabase = new SqliteConnection("Data Source=:memory:");
-            await memoryDatabase.OpenAsync(token).ConfigureAwait(false);
+            await memoryDatabase.OpenAsync(token);
 
             // Create tables and initial structure
             await using (var command = memoryDatabase.CreateCommand())
             {
                 command.CommandText = Secret.CreateTableSql;
-                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                await command.ExecuteNonQueryAsync(token);
             }
 
-            await using (var databaseStream = await WriteDatabaseToFile(memoryDatabase, token).ConfigureAwait(false))
+            await using (var databaseStream = await WriteDatabaseToFile(memoryDatabase, token))
             using (var encryptedStream = new MemoryStream())
             {
                 await Aes256.EncryptStream(
@@ -212,27 +265,27 @@ namespace Nivora.Core.Database
                         parameters.Argon2Iterations,
                         parameters.Argon2Memory,
                         parameters.Argon2Parallelism,
-                        parameters.Salt).ConfigureAwait(false),
-                    parameters.Iv, token: token).ConfigureAwait(false);
+                        parameters.Salt),
+                    parameters.Iv, token: token);
 
                 parameters.Content = encryptedStream.ToArray();
 
-                var tlvStream2 = (await parameters.WriteToTlvStream(token).ConfigureAwait(false)).Stream;
+                var tlvStream2 = (await parameters.WriteToTlvStream(token)).Stream;
                 tlvStream2.Position = 0;
                 var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
                 var filePathIv = ShuffleBytes(filePathBytes, 16);
                 using (var cryptoStream = new MemoryStream())
                 {
-                    await Aes256.EncryptStream(tlvStream2, cryptoStream, filePathBytes, filePathIv, token: token).ConfigureAwait(false);
+                    await Aes256.EncryptStream(tlvStream2, cryptoStream, filePathBytes, filePathIv, token: token);
                     await using (var fileStream = new FileStream(fileInfo.FullName, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
                     {
-                        var buffer = cryptoStream.ToArray();
-                        await fileStream.WriteAsync(buffer, token).ConfigureAwait(false);
+                        cryptoStream.Position = 0;
+                        await cryptoStream.CopyToAsync(fileStream, token);
                     }
                 }
             }
 
-            return await OpenVault(fileInfo.FullName, password, token).ConfigureAwait(false);
+            return await OpenVault(fileInfo.FullName, password, token);
         }
 
         /// <summary>
@@ -245,10 +298,25 @@ namespace Nivora.Core.Database
         {
             var tempFileStream = new TempFileStream();
             await using var fileDatabase = new SqliteConnection($"Data Source={tempFileStream.Path};");
-            await fileDatabase.OpenAsync(token).ConfigureAwait(false);
+            await fileDatabase.OpenAsync(token);
             databaseConnection.BackupDatabase(fileDatabase);
-            await fileDatabase.CloseAsync().ConfigureAwait(false);
+            await fileDatabase.CloseAsync();
             return tempFileStream;
+        }
+
+        private static async Task<SqliteConnection> ReadBinaryDatabaseToMemory(byte[] binaryDatabase,
+            CancellationToken token = default(CancellationToken))
+        {
+            var memoryDatabase = new SqliteConnection("Data Source=:memory:");
+            await memoryDatabase.OpenAsync(token);
+
+            await using var tempFileStream = new TempFileStream();
+            await tempFileStream.WriteAsync(binaryDatabase, token);
+            await using var fileDatabase = new SqliteConnection($"Data Source={tempFileStream.Path};");
+            await fileDatabase.OpenAsync(token);
+            fileDatabase.BackupDatabase(memoryDatabase);
+            await fileDatabase.CloseAsync();
+            return memoryDatabase;
         }
 
         /// <summary>
@@ -283,7 +351,7 @@ namespace Nivora.Core.Database
         /// <param name="path">The file path.</param>
         /// <param name="count">Number of bytes to return.</param>
         /// <returns>Byte array for key derivation.</returns>
-        private static byte[] GetBytesFromFilePath(string path, int count = 32)
+        private byte[] GetBytesFromFilePath(string path, int count = 32)
         {
             var bytes = Encoding.UTF8.GetBytes(path).Reverse().Take(count).Reverse().ToArray();
             if (bytes.Length >= count) return bytes;
@@ -296,13 +364,13 @@ namespace Nivora.Core.Database
         /// </summary>
         /// <param name="vaultName">The name of the vault (without extension).</param>
         /// <returns>The full file path to the vault.</returns>
-        private static string GetVaultPath(string vaultName = null)
+        internal static string GetVaultPath(string? vaultName = null)
         {
             if (string.IsNullOrEmpty(vaultName))
-                vaultName = DefaultVaultName;
+                vaultName = NivoraStatics.DefaultVaultName;
 
             return System.IO.Path.ChangeExtension(System.IO.Path.Combine(NivoraStatics.NivoraApplicationDataPath, vaultName),
-                DefaultVaultExtension);
+                NivoraStatics.DefaultVaultExtension);
         }
 
         /// <summary>
@@ -312,7 +380,7 @@ namespace Nivora.Core.Database
         /// <param name="vaultName">The name of the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The created vault instance.</returns>
-        public static Task<Vault> CreateNew(string password, string vaultName = null, CancellationToken token = default(CancellationToken))
+        internal Task<Vault> CreateNew(string password, string vaultName = null, CancellationToken token = default(CancellationToken))
         {
             if (string.IsNullOrEmpty(password))
                 throw new ArgumentException("Password cannot be null or empty.", nameof(password));
@@ -326,7 +394,7 @@ namespace Nivora.Core.Database
         /// <param name="vaultName">The name of the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The opened vault instance, or null if not found.</returns>
-        public static Task<Vault> OpenExisting(string password, string vaultName = null, CancellationToken token = default(CancellationToken))
+        internal Task<Vault> OpenExisting(string password, string vaultName = null, CancellationToken token = default(CancellationToken))
         {
             return OpenVault(GetVaultPath(vaultName), password, token);
         }

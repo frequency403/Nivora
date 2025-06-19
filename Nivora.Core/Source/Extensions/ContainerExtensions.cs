@@ -1,3 +1,4 @@
+using System.Reflection;
 using DryIoc;
 using Nivora.Core.Factory;
 using Nivora.Core.Interfaces;
@@ -22,7 +23,7 @@ public static class ContainerExtensions
         {
             MinimumLevel = LogEventLevel.Verbose // Default file log level
         };
-        var logFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nivora", "logs");
+        var logFilePath = NivoraStatics.NivoraLogsPath;
         if (!Directory.Exists(logFilePath)) Directory.CreateDirectory(logFilePath);
         // Register core services here
         
@@ -31,7 +32,7 @@ public static class ContainerExtensions
             .MinimumLevel.ControlledBy(consoleLogLevelSwitch)
             .WriteTo.Console(levelSwitch: consoleLogLevelSwitch)
 #endif
-            .WriteTo.File(Path.Combine(logFilePath, "nivora.log"), rollingInterval: RollingInterval.Day,
+            .WriteTo.File(Path.Combine(logFilePath, Path.ChangeExtension(Assembly.GetExecutingAssembly().FullName?.Split('.')[0].ToLower(), "log") ?? "nivora.log"), rollingInterval: RollingInterval.Day,
                 levelSwitch: fileLogLevelSwitch)
             .Enrich.FromLogContext()
             .Enrich.WithProperty("Application", "Nivora")

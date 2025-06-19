@@ -3,6 +3,7 @@ using Nivora.Core;
 using Nivora.Core.Database;
 using Nivora.Core.Database.Models;
 using Nivora.Core.Enums;
+using Nivora.Core.Interfaces;
 using Org.BouncyCastle.Crypto;
 using Serilog;
 using Spectre.Console;
@@ -10,9 +11,9 @@ using Spectre.Console.Cli;
 
 namespace Nivora.Cli.Commands;
 
-public class UseCommand(ILogger logger) : AsyncCommand<UseArguments>
+public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncCommand<UseArguments>
 {
-    private CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
     public override async Task<int> ExecuteAsync(CommandContext context, UseArguments settings)
     {
         string password;
@@ -50,11 +51,12 @@ public class UseCommand(ILogger logger) : AsyncCommand<UseArguments>
 
         try
         {
-            var vault = await Vault.OpenExisting(password, vaultFile.Name, _cancellationTokenSource.Token);
+            var vault = await vaultFactory.OpenAsync(password, vaultFile.Name, _cancellationTokenSource.Token);
             logger.Information("Vault '{VaultName}' opened successfully.", vaultFile.Name);
             AnsiConsole.MarkupLine($"[green]Vault '{vault.Name}' opened successfully![/]");
             AnsiConsole.Clear();
-            while (true)
+            var shouldExit = false;
+            while (!shouldExit)
             {
                 var secretName = settings.SecretName;
                 var secretValue = settings.SecretValue;
@@ -95,13 +97,44 @@ public class UseCommand(ILogger logger) : AsyncCommand<UseArguments>
                         }
 
                         var newSecret = await Secret.CreateFromPlaintext(secretName, secretValue, password);
-                        var secret = await vault.AddSecret(newSecret);
-                        if (secret is not null)
-                            AnsiConsole.MarkupLine("[green]Secret '{SecretName}' added successfully![/]", secret.Name);
-                        else
-                            AnsiConsole.MarkupLine("[red]Failed to add secret.[/]");
+                        var secret = await vault.AddSecretAsync(newSecret);
+                        AnsiConsole.MarkupLine(secret is not null
+                            ? $"[green]Secret '{secret.Name}' added successfully![/]"
+                            : "[red]Failed to add secret.[/]");
+                        break;
+                    case VaultOperation.ListSecrets:
+                        var table = new Table().AddColumns("ID", "Name", "Created At", "Updated At")
+                            .RoundedBorder()
+                            .Title(new TableTitle($"[blue]Secrets in Vault[/] [gray]\"{vault.Name}\"[/]"));
+                        await AnsiConsole.Live(table).StartAsync(async ctx =>
+                        {
+                            var anySecrets = false;
+                            await foreach(var vaultSecret in vault.GetAllSecretsAsync())
+                            {
+                                table.AddRow(
+                                    vaultSecret.Id.ToString(),
+                                    vaultSecret.Name,
+                                    vaultSecret.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                                    vaultSecret.UpdatedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "N/A");
+                                ctx.Refresh();
+                                anySecrets = true;
+                            }
+
+                            if (!anySecrets)
+                            {
+                                AnsiConsole.MarkupLine("[red]No secret found in vault.[/]");
+                            }
+                        });
+                        var input = await AnsiConsole.AskAsync<string>("Press C to clear and any other key to continue...");
+                        if (input?.ToUpperInvariant() == "C")
+                        {
+                            AnsiConsole.Clear();
+                        }
                         break;
                     case VaultOperation.Exit:
+                        shouldExit = true;
+                        AnsiConsole.MarkupLine("[yellow]Exiting nivora. Goodbye![/]");
+                        break;
                     case VaultOperation.RemoveSecret:
                     case VaultOperation.UpdateSecret:
                     case VaultOperation.GetSecret:

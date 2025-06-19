@@ -35,7 +35,7 @@ public record Secret
         return new Secret
         {
             Name = name,
-            Value = Aes256.Encrypt(Encoding.UTF8.GetBytes(value), iv, key),
+            Value = Aes256.Encrypt(Encoding.UTF8.GetBytes(value), key, iv),
             Iv = iv
         };
     }

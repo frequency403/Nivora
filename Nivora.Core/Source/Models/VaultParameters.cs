@@ -73,27 +73,34 @@ public record VaultParameters
                 ivElement = element;
             else if (TlvTag.Content.Equals(element.Tag)) contentElement = element;
 
-        if (magicElement == null || versionElement == null || saltElement == null ||
-            argon2MemoryElement == null || argon2IterationsElement == null ||
-            argon2ParallelismElement == null || ivElement == null || contentElement == null)
-            throw new InvalidOperationException("Invalid vault file format.");
+        var elementsNull = new List<string>();
+        if (magicElement == null) elementsNull.Add("Magic");
+        if (versionElement == null) elementsNull.Add("Version");
+        if (saltElement == null) elementsNull.Add("Salt");
+        if (argon2MemoryElement == null) elementsNull.Add("Argon2Memory");
+        if (argon2IterationsElement == null) elementsNull.Add("Argon2Iterations");
+        if (argon2ParallelismElement == null) elementsNull.Add("Argon2Parallelism");
+        if (ivElement == null) elementsNull.Add("IV");
+        if (contentElement == null) elementsNull.Add("Content");
+        if (elementsNull.Count > 0)
+            throw new InvalidOperationException($"Invalid vault file format. Missing elements: {string.Join(", ", elementsNull)}");
 
-        if (magicElement.Value.Length != 4 || !Encoding.UTF8.GetString(magicElement.Value).Equals(MagicNumber))
-            throw new InvalidOperationException("Invalid vault file format.");
+        if (magicElement!.Value.Length != 4 || !Encoding.UTF8.GetString(magicElement.Value).Equals(MagicNumber))
+            throw new InvalidOperationException("Invalid vault file format. Expected signature not found.");
 
-        if (!VaultVersion.TryFromBytes(versionElement.Value, out var version))
+        if (!VaultVersion.TryFromBytes(versionElement!.Value, out var version))
             throw new InvalidOperationException("Unsupported or unknown vault version.");
 
         parameters.Version = version;
-        parameters.Salt = saltElement.Value;
-        parameters.Argon2Memory = BitConverter.ToInt32(argon2MemoryElement.Value, 0);
-        parameters.Argon2Iterations = BitConverter.ToInt32(argon2IterationsElement.Value, 0);
-        parameters.Argon2Parallelism = BitConverter.ToInt32(argon2ParallelismElement.Value, 0);
+        parameters.Salt = saltElement!.Value;
+        parameters.Argon2Memory = BitConverter.ToInt32(argon2MemoryElement!.Value, 0);
+        parameters.Argon2Iterations = BitConverter.ToInt32(argon2IterationsElement!.Value, 0);
+        parameters.Argon2Parallelism = BitConverter.ToInt32(argon2ParallelismElement!.Value, 0);
         if (parameters.Argon2Memory <= 0 || parameters.Argon2Iterations <= 0 || parameters.Argon2Parallelism <= 0)
             throw new InvalidOperationException("Argon2 parameters must be positive integers.");
-        parameters.Iv = ivElement.Value;
+        parameters.Iv = ivElement!.Value;
         if (parameters.Iv.Length != 16) throw new InvalidOperationException("IV must be exactly 16 bytes long.");
-        parameters.Content = contentElement.Value;
+        parameters.Content = contentElement!.Value;
         if (parameters.Content.Length == 0) throw new InvalidOperationException("Content cannot be empty.");
         return parameters;
     }

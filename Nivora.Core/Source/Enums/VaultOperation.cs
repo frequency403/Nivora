@@ -6,5 +6,6 @@ public enum VaultOperation
     RemoveSecret,
     UpdateSecret,
     GetSecret,
+    ListSecrets,
     Exit,
 }

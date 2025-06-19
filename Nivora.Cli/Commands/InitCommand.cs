@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Nivora.Cli.Commands.Arguments;
 using Nivora.Core.Database;
 using Nivora.Core.Exceptions;
+using Nivora.Core.Interfaces;
 using Serilog;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -9,7 +10,7 @@ using Spectre.Console.Extensions;
 
 namespace Nivora.Cli.Commands;
 
-public class InitCommand(ILogger logger) : AsyncCommand<BaseArguments>
+public class InitCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncCommand<BaseArguments>
 {
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     public override async Task<int> ExecuteAsync(CommandContext context, BaseArguments arguments)
@@ -32,7 +33,7 @@ public class InitCommand(ILogger logger) : AsyncCommand<BaseArguments>
             logger.Information("Initializing vault '{VaultName}'...", arguments.VaultName);
             AnsiConsole.Write("Initializing vault '{0}'", arguments.VaultName);
             var stopwatch = Stopwatch.StartNew();
-            await using var vault = await Vault.CreateNew(arguments.Password, arguments.VaultName, cancellationToken).Spinner(Spinner.Known.SimpleDotsScrolling);
+            await using var vault = await vaultFactory.CreateAsync(arguments.Password, arguments.VaultName, cancellationToken).Spinner(Spinner.Known.SimpleDotsScrolling);
             stopwatch.Stop();
             AnsiConsole.WriteLine();
             logger.Information("Created vault '{VaultName}' with version {Version} in {ElapsedTime} s",

@@ -8,11 +8,13 @@ public class VaultFactory(ILogger logger) : IVaultFactory
 {
     public Task<Vault?> CreateAsync(string password, string? vaultName, CancellationToken cancellationToken = default)
     {
-        return Vault.CreateNew(password, vaultName, cancellationToken);
+        var vault = Vault.Empty(logger);
+        return vault.CreateNew(password, vaultName, cancellationToken);
     }
     
     public Task<Vault?> OpenAsync(string password, string? vaultName, CancellationToken cancellationToken = default)
     {
-        return Vault.OpenExisting(password, vaultName, cancellationToken);
+        var vault = Vault.Empty(logger);
+        return vault.OpenExisting(password, vaultName, cancellationToken);
     }
 }
