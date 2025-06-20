@@ -22,7 +22,7 @@ public record Secret
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; } = null;
 
-    public static async Task<Secret> CreateFromPlaintext(string name, string value, string masterPassword)
+    public static async Task<Secret> CreateFromPlaintext(string name, string value, byte[] masterPassword)
     {
         if (string.IsNullOrEmpty(name))
             throw new ArgumentException("Name cannot be null or empty.", nameof(name));

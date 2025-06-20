@@ -3,6 +3,7 @@ using Nivora.Cli.Commands.Arguments;
 using Nivora.Core.Database;
 using Nivora.Core.Exceptions;
 using Nivora.Core.Interfaces;
+using Org.BouncyCastle.Crypto;
 using Serilog;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -16,16 +17,16 @@ public class InitCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComm
     public override async Task<int> ExecuteAsync(CommandContext context, BaseArguments arguments)
     {
         var cancellationToken = _cancellationTokenSource.Token;
-
+        arguments.Password ??= [];
         if (string.IsNullOrEmpty(arguments.VaultName))
         {
             logger.Error("Vault name cannot be null or empty.");
             return 1;
         }
 
-        if (string.IsNullOrEmpty(arguments.Password))
+        if (arguments.Password.Length == 0)
         {
-            arguments.Password = await AnsiConsole.PromptAsync(new TextPrompt<string>($"Enter a password for your vault [red]\"{arguments.VaultName}\"[/]:").PromptStyle("green").Secret(), cancellationToken);
+            arguments.Password = PasswordConverter.Utf8.Convert((await AnsiConsole.PromptAsync(new TextPrompt<string>($"Enter a password for your vault [red]\"{arguments.VaultName}\"[/]:").PromptStyle("green").Secret(), cancellationToken)).ToCharArray());
         }
         
         try

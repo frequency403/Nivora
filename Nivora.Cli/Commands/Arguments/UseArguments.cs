@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using Nivora.Cli.Converter;
+using Nivora.Cli.Commands.Arguments.Converters;
 using Nivora.Core.Enums;
 using Spectre.Console.Cli;
 
@@ -17,6 +17,6 @@ public class UseArguments : BaseArguments
     
     [CommandOption("-o|--operation <operation>")]
     [Description("The operation to perform on the vault. If not specified, the user will be prompted to select an operation.")]
-    [TypeConverter(typeof(StringToVaultOperationConverter))]
+    [TypeConverter(typeof(VaultOperationConverter))]
     public VaultOperation? Operation { get; set; }
 }

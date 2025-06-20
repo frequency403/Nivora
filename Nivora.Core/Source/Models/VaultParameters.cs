@@ -11,10 +11,45 @@ public record VaultParameters
     public int Argon2Parallelism { get; set; } = 1;
     public byte[] Iv { get; set; } = [];
 
-    public byte[] Content { get; set; } = [];
+    private bool IsContentEncrypted { get; set; }
+    private byte[] _content = [];
+
+    public byte[] Content
+    {
+        get => _content;
+        set
+        {
+            if (value == null || value.Length == 0)
+                throw new ArgumentException("Content cannot be null or empty.", nameof(value));
+            _content = value;
+        }
+    }
 
     public VaultVersion Version { get; private set; } = VaultVersion.Current;
 
+    public async Task EncryptContent(byte[] masterPassword)
+    {
+        if (IsContentEncrypted) return;
+        if (masterPassword == null || masterPassword.Length == 0)
+            throw new ArgumentException("Master password cannot be null or empty.", nameof(masterPassword));
+        if (Salt == null || Salt.Length == 0)
+            throw new InvalidOperationException("Salt must be set before encrypting content.");
+        var key = await Argon2Hash.HashBytes(masterPassword, this);
+        Content = Aes256.Encrypt(Content, key, Iv);
+        IsContentEncrypted = true;
+    }
+    
+    public async Task DecryptContent(byte[] masterPassword)
+    {
+        if (!IsContentEncrypted) return;
+        if (masterPassword == null || masterPassword.Length == 0)
+            throw new ArgumentException("Master password cannot be null or empty.", nameof(masterPassword));
+        if (Salt == null || Salt.Length == 0)
+            throw new InvalidOperationException("Salt must be set before decrypting content.");
+        var key = await Argon2Hash.HashBytes(masterPassword, this);
+        Content = Aes256.Decrypt(Content, key, Iv);
+        IsContentEncrypted = false;
+    }
 
     public static VaultParameters Default => new()
     {
@@ -100,6 +135,7 @@ public record VaultParameters
             throw new InvalidOperationException("Argon2 parameters must be positive integers.");
         parameters.Iv = ivElement!.Value;
         if (parameters.Iv.Length != 16) throw new InvalidOperationException("IV must be exactly 16 bytes long.");
+        parameters.IsContentEncrypted = true;
         parameters.Content = contentElement!.Value;
         if (parameters.Content.Length == 0) throw new InvalidOperationException("Content cannot be empty.");
         return parameters;

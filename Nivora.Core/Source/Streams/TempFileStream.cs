@@ -66,6 +66,18 @@ public class TempFileStream : Stream
     {
         return _fileStream.WriteAsync(buffer, cancellationToken);
     }
+    
+    public async Task<byte[]> ToArrayAsync(CancellationToken cancellationToken = default)
+    {
+        if (_fileStream.Length == 0)
+            return [];
+
+        await _fileStream.FlushAsync(cancellationToken);
+        _fileStream.Seek(0, SeekOrigin.Begin);
+        var buffer = new byte[_fileStream.Length];
+        await _fileStream.ReadExactlyAsync(buffer, 0, buffer.Length, cancellationToken);
+        return buffer;
+    }
 
 
     protected override void Dispose(bool disposing)

@@ -19,11 +19,11 @@ namespace Nivora.Core.Database
     public class Vault : IDisposable, IAsyncDisposable
     {
         private readonly ILogger _logger;
-        private VaultParameters Parameters { get; init; }
+        private VaultParameters Parameters { get; set; }
 
         internal static Vault Empty(ILogger logger) => new(logger);
         
-        private byte[] DerivedKey { get; set; }
+        private byte[] MasterPassword { get; set; }
 
         // Hide default constructor for controlled initialization
         private Vault(ILogger logger)
@@ -31,12 +31,12 @@ namespace Nivora.Core.Database
             _logger = logger;
         }
 
-        public string Name => System.IO.Path.GetFileNameWithoutExtension(Path);
+        public string Name => System.IO.Path.GetFileNameWithoutExtension(Path.FullName);
         
         /// <summary>
         /// The file path of the vault.
         /// </summary>
-        public string Path { get; private set; }
+        public FileInfo Path { get; private set; }
 
         /// <summary>
         /// The version of the vault.
@@ -142,41 +142,26 @@ namespace Nivora.Core.Database
                 await Connection.CloseAsync();
                 await using (var tempFileStream = await WriteDatabaseToFile(Connection, cancellationToken))
                 {
-                    await using var encryptionBufferStream = new MemoryStream();
-                    await Aes256.EncryptStream(
-                        tempFileStream, encryptionBufferStream,
-                        DerivedKey, Parameters.Iv, token: cancellationToken);
-                    encryptionBufferStream.Position = 0;
-                    Parameters.Content = encryptionBufferStream.ToArray();
+                    Parameters.Content = await tempFileStream.ToArrayAsync(cancellationToken);
+                    await Parameters.EncryptContent(MasterPassword);
                 }
-
-                Connection = await ReadBinaryDatabaseToMemory(Parameters.Content, cancellationToken);
-                await Connection.OpenAsync(cancellationToken);
-
-                await using (var tlvStream = await Parameters.WriteToTlvStream(cancellationToken))
+                await TlvStream.WriteParametersAndEncrypt(Parameters, Path, MasterPassword,
+                    cancellationToken);
+                var parameters = await TlvStream.ReadEncryptedStream(Path, MasterPassword, cancellationToken);
+                if (parameters == null)
                 {
-                    var filePathBytes = GetBytesFromFilePath(Path);
-                    var filePathIv = ShuffleBytes(filePathBytes, 16);
-                    using (var cryptoStream = new MemoryStream())
-                    {
-                        await Aes256.EncryptStream(tlvStream.Stream, cryptoStream, filePathBytes, filePathIv,
-                            token: cancellationToken);
-                        cryptoStream.Position = 0;
-                        
-                        await using (var fileStream =
-                                     new FileStream(Path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
-                        {
-                            await cryptoStream.CopyToAsync(fileStream, cancellationToken);
-                        }
-                    }
+                    _logger.Error("Failed to read vault parameters after writing.");
+                    Path.Delete();
+                    await DisposeAsync();
+                    return false;
                 }
+                Connection = await ReadBinaryDatabaseToMemory(parameters.Content, cancellationToken);
             }
             catch (Exception e)
             {
                 _logger.Error(e, "Error while updating vault");
                 return false;
             }
-
             return true;
         }
 
@@ -187,45 +172,21 @@ namespace Nivora.Core.Database
         /// <param name="password">The password to decrypt the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The opened Vault instance, or null if the file does not exist.</returns>
-        private async Task<Vault> OpenVault(string path, string password, CancellationToken token)
+        private async Task<Vault> OpenVault(string path, byte[] password, CancellationToken token)
         {
             var fileInfo = new FileInfo(path);
             if (!fileInfo.Exists)
                 throw new FileNotFoundException($"Vaultfile '{fileInfo.FullName}' not found.", fileInfo.FullName);
-
-            var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
-            var filePathIv = ShuffleBytes(filePathBytes, 16);
-
-            VaultParameters parameters;
-            await using (var encryptedFileStream = new FileStream(
-                             fileInfo.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            await using (var decryptedFileStream = new MemoryStream())
-            await using (var tlvStream = new TlvStream(decryptedFileStream))
-            {
-                // Decrypt the file
-                await Aes256.DecryptStream(
-                    encryptedFileStream, decryptedFileStream, filePathBytes, filePathIv, token: token);
-                decryptedFileStream.Position = 0;
-                parameters = await VaultParameters.ReadFromTlvStream(tlvStream, token);
-            };
-             
-            var derivedKey = await Argon2Hash.HashBytes(
-                password,
-                parameters.Argon2Iterations,
-                parameters.Argon2Memory,
-                parameters.Argon2Parallelism,
-                parameters.Salt);
-
-            var decryptedContent = Aes256.Decrypt(parameters.Content, derivedKey, parameters.Iv);
-            var memoryDatabase = await ReadBinaryDatabaseToMemory(decryptedContent, token);
-                    
-
+            var parameters = await TlvStream.ReadEncryptedStream(fileInfo, password, token);
+            if (parameters == null)
+                throw new InvalidOperationException("Failed to read vault parameters from the encrypted file.");
+            var memoryDatabase = await ReadBinaryDatabaseToMemory(parameters.Content, token);
             return new Vault(_logger)
             {
-                Path = fileInfo.FullName,
+                Path = fileInfo,
                 Connection = memoryDatabase,
                 Parameters = parameters,
-                DerivedKey = derivedKey
+                MasterPassword = password
             };
         }
 
@@ -236,7 +197,7 @@ namespace Nivora.Core.Database
         /// <param name="password">The password for the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The created Vault instance.</returns>
-        private async Task<Vault> CreateVault(string path, string password, CancellationToken token)
+        private async Task<Vault> CreateVault(string path, byte[] password, CancellationToken token)
         {
             var fileInfo = new FileInfo(path);
             VaultFileExistsException.ThrowIfExists(fileInfo);
@@ -256,36 +217,20 @@ namespace Nivora.Core.Database
             }
 
             await using (var databaseStream = await WriteDatabaseToFile(memoryDatabase, token))
-            using (var encryptedStream = new MemoryStream())
             {
-                await Aes256.EncryptStream(
-                    databaseStream, encryptedStream,
-                    await Argon2Hash.HashBytes(
-                        password,
-                        parameters.Argon2Iterations,
-                        parameters.Argon2Memory,
-                        parameters.Argon2Parallelism,
-                        parameters.Salt),
-                    parameters.Iv, token: token);
-
-                parameters.Content = encryptedStream.ToArray();
-
-                var tlvStream2 = (await parameters.WriteToTlvStream(token)).Stream;
-                tlvStream2.Position = 0;
-                var filePathBytes = GetBytesFromFilePath(fileInfo.FullName);
-                var filePathIv = ShuffleBytes(filePathBytes, 16);
-                using (var cryptoStream = new MemoryStream())
-                {
-                    await Aes256.EncryptStream(tlvStream2, cryptoStream, filePathBytes, filePathIv, token: token);
-                    await using (var fileStream = new FileStream(fileInfo.FullName, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
-                    {
-                        cryptoStream.Position = 0;
-                        await cryptoStream.CopyToAsync(fileStream, token);
-                    }
-                }
+                databaseStream.Position = 0;
+                parameters.Content = await databaseStream.ToArrayAsync(token);
             }
+            await TlvStream.WriteParametersAndEncrypt(parameters, fileInfo, password, token);
+            
 
-            return await OpenVault(fileInfo.FullName, password, token);
+            return new Vault(_logger)
+            {
+                Path = fileInfo,
+                Connection = memoryDatabase,
+                Parameters = parameters,
+                MasterPassword = password
+            };
         }
 
         /// <summary>
@@ -326,7 +271,7 @@ namespace Nivora.Core.Database
         /// <param name="input">The input byte array to be permuted.</param>
         /// <param name="size">Maximum number of bytes to output.</param>
         /// <returns>Shuffled byte array.</returns>
-        private static byte[] ShuffleBytes(byte[] input, int size)
+        internal static byte[] ShuffleBytes(byte[] input, int size)
         {
             var result = new byte[Math.Min(size, input.Length)];
             var left = 0;
@@ -351,7 +296,7 @@ namespace Nivora.Core.Database
         /// <param name="path">The file path.</param>
         /// <param name="count">Number of bytes to return.</param>
         /// <returns>Byte array for key derivation.</returns>
-        private byte[] GetBytesFromFilePath(string path, int count = 32)
+        internal byte[] GetBytesFromFilePath(string path, int count = 32)
         {
             var bytes = Encoding.UTF8.GetBytes(path).Reverse().Take(count).Reverse().ToArray();
             if (bytes.Length >= count) return bytes;
@@ -380,9 +325,9 @@ namespace Nivora.Core.Database
         /// <param name="vaultName">The name of the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The created vault instance.</returns>
-        internal Task<Vault> CreateNew(string password, string vaultName = null, CancellationToken token = default(CancellationToken))
+        internal Task<Vault> CreateNew(byte[] password, string vaultName = null, CancellationToken token = default(CancellationToken))
         {
-            if (string.IsNullOrEmpty(password))
+            if (password == null || password.Length == 0)
                 throw new ArgumentException("Password cannot be null or empty.", nameof(password));
             return CreateVault(GetVaultPath(vaultName), password, token);
         }
@@ -394,7 +339,7 @@ namespace Nivora.Core.Database
         /// <param name="vaultName">The name of the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The opened vault instance, or null if not found.</returns>
-        internal Task<Vault> OpenExisting(string password, string vaultName = null, CancellationToken token = default(CancellationToken))
+        internal Task<Vault> OpenExisting(byte[] password, string vaultName = null, CancellationToken token = default(CancellationToken))
         {
             return OpenVault(GetVaultPath(vaultName), password, token);
         }

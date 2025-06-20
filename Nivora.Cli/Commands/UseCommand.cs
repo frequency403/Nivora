@@ -16,8 +16,8 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     public override async Task<int> ExecuteAsync(CommandContext context, UseArguments settings)
     {
-        string password;
-        FileInfo vaultFile = new FileInfo(Path.Combine(NivoraStatics.NivoraApplicationDataPath, settings?.VaultName ?? "vault"));
+        settings.Password ??= [];
+        var vaultFile = new FileInfo(Path.Combine(NivoraStatics.NivoraApplicationDataPath, settings?.VaultName ?? "vault"));
         if (!vaultFile.Exists)
         {
             logger.Information("No valid vault name provided. Listing all when available and force selection.");
@@ -38,20 +38,17 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
                 _cancellationTokenSource.Token);
         }
 
-        if (string.IsNullOrWhiteSpace(settings.Password))
+        if (settings?.Password?.Length == 0)
         {
-            password = await AnsiConsole.PromptAsync(new TextPrompt<string>("Enter a password for the vault:")
+            settings.Password = PasswordConverter.Utf8.Convert((await AnsiConsole.PromptAsync(new TextPrompt<string>("Enter a password for the vault:")
                 .PromptStyle("green")
-                .Secret(), _cancellationTokenSource.Token);
+                .Secret(), _cancellationTokenSource.Token)).ToCharArray());
         }
-        else
-        {
-            password = settings.Password;
-        }
+
 
         try
         {
-            var vault = await vaultFactory.OpenAsync(password, vaultFile.Name, _cancellationTokenSource.Token);
+            var vault = await vaultFactory.OpenAsync(settings?.Password, vaultFile.Name, _cancellationTokenSource.Token);
             logger.Information("Vault '{VaultName}' opened successfully.", vaultFile.Name);
             AnsiConsole.MarkupLine($"[green]Vault '{vault.Name}' opened successfully![/]");
             AnsiConsole.Clear();
@@ -96,7 +93,7 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
                             secretValue = await AnsiConsole.PromptAsync(secretValuePrompt);
                         }
 
-                        var newSecret = await Secret.CreateFromPlaintext(secretName, secretValue, password);
+                        var newSecret = await Secret.CreateFromPlaintext(secretName, secretValue, settings.Password);
                         var secret = await vault.AddSecretAsync(newSecret);
                         AnsiConsole.MarkupLine(secret is not null
                             ? $"[green]Secret '{secret.Name}' added successfully![/]"

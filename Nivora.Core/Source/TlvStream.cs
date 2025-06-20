@@ -20,6 +20,79 @@ public class TlvStream : IDisposable, IAsyncDisposable
     {
         _closeStream = !closeStream ? stream is null : closeStream;
         Stream = stream ?? new MemoryStream();
+        Stream.Position = 0;
+    }
+    
+    /// <summary>
+    /// Shuffles the input bytes in the pattern 0, N-1, 1, N-2, ... up to a maximum of <paramref name="size" /> elements.
+    /// If the input is shorter than <paramref name="size" />, uses only as many as are available.
+    /// </summary>
+    /// <param name="input">The input byte array to be permuted.</param>
+    /// <param name="size">Maximum number of bytes to output.</param>
+    /// <returns>Shuffled byte array.</returns>
+    internal static byte[] ShuffleBytes(byte[] input, int size)
+    {
+        var result = new byte[Math.Min(size, input.Length)];
+        var left = 0;
+        var right = input.Length - 1;
+        var index = 0;
+
+        while (index < result.Length && left <= right)
+        {
+            // Add from left
+            if (index < result.Length) result[index++] = input[left++];
+
+            // Add from right
+            if (index < result.Length && left <= right) result[index++] = input[right--];
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Gets the last <paramref name="count"/> bytes of the file path (UTF-8 encoded), padded with zeros if needed.
+    /// </summary>
+    /// <param name="path">The file path.</param>
+    /// <param name="count">Number of bytes to return.</param>
+    /// <returns>Byte array for key derivation.</returns>
+    internal static byte[] GetBytesFromFilePath(string path, int count = 32)
+    {
+        var bytes = Encoding.UTF8.GetBytes(path).Reverse().Take(count).Reverse().ToArray();
+        if (bytes.Length >= count) return bytes;
+        var padding = new byte[count - bytes.Length];
+        return bytes.Concat(padding).ToArray();
+    }
+    
+    public static async Task<VaultParameters?> ReadEncryptedStream(FileInfo vaultFile, byte[] password, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var encryptedFileStream = vaultFile.OpenRead();
+            var filePathBytes = GetBytesFromFilePath(vaultFile.FullName);
+            var shuffledBytes = ShuffleBytes(filePathBytes, 16);
+            using var decryptedFileStream = new MemoryStream();
+            await Aes256.DecryptStream(encryptedFileStream, decryptedFileStream, filePathBytes, shuffledBytes,
+                token: cancellationToken);
+            await using var tlvStream = new TlvStream(decryptedFileStream, closeStream: true);
+            var parameters = await VaultParameters.ReadFromTlvStream(tlvStream, cancellationToken);
+            await parameters.DecryptContent(password);
+            return parameters;
+        }
+        catch (Exception )
+        {
+            return null;
+        }
+    }
+
+    public static async Task WriteParametersAndEncrypt(VaultParameters parameters, FileInfo vaultFile, byte[] password,
+        CancellationToken cancellationToken = default)
+    {
+        await parameters.EncryptContent(password);
+        var filePathBytes = GetBytesFromFilePath(vaultFile.FullName);
+        var shuffledBytes = ShuffleBytes(filePathBytes, 16);
+        await using var encryptedFileStream = vaultFile.Open(FileMode.Truncate);
+        await using var tlvStream = await parameters.WriteToTlvStream(cancellationToken);
+        await Aes256.EncryptStream(tlvStream.Stream, encryptedFileStream, filePathBytes, shuffledBytes, token: cancellationToken);
     }
 
     public Stream Stream { get; }
@@ -162,7 +235,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
     /// <param name="elements">The TLV elements to write.</param>
     public void WriteElements(IEnumerable<TlvElement> elements)
     {
-        foreach (var element in elements) Write(element.Tag, element.Value);
+        foreach (var element in elements.OrderBy(e => e.Tag.Value)) Write(element.Tag, element.Value);
     }
 
     /// <summary>
@@ -172,7 +245,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task WriteAllAsync(IEnumerable<TlvElement> elements, CancellationToken cancellationToken = default)
     {
-        foreach (var element in elements)
+        foreach (var element in elements.OrderBy(e => e.Tag.Value))
             await WriteAsync(element.Tag, element.Value, cancellationToken).ConfigureAwait(false);
     }
 
