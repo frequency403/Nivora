@@ -12,43 +12,89 @@ public record VaultParameters
     public byte[] Iv { get; set; } = [];
 
     private bool IsContentEncrypted { get; set; }
+
+    /// <summary>
+    /// Securely overwrites the contents of the byte array with zeros.
+    /// </summary>
+    private static void ZeroMemory(byte[]? buffer)
+    {
+        if (buffer == null) return;
+        for (var i = 0; i < buffer.Length; i++)
+        {
+            buffer[i] = 0;
+        }
+    }
+
+    // Private content field, always access through lock for thread safety.
     private byte[] _content = [];
 
-    public byte[] Content
+    // Lock object for synchronization.
+    private readonly Lock _contentLock = new Lock();
+
+    /// <summary>
+    /// Gets the decrypted content using the provided master password.
+    /// </summary>
+    /// <param name="masterPassword">The password to decrypt the content.</param>
+    /// <returns>Decrypted content as byte array.</returns>
+    public async Task<byte[]> GetContentAsync(byte[] masterPassword)
     {
-        get => _content;
-        set
+        // Parameter validation
+        ArgumentNullException.ThrowIfNull(masterPassword);
+
+        byte[] encryptedContentCopy;
+        lock (_contentLock)
         {
-            if (value == null || value.Length == 0)
-                throw new ArgumentException("Content cannot be null or empty.", nameof(value));
-            _content = value;
+            // Defensive copy to avoid race conditions.
+            encryptedContentCopy = (byte[])_content.Clone();
+        }
+
+        // Decrypt content (method must be implemented by you)
+        return await DecryptContentAsync(masterPassword, encryptedContentCopy);
+    }
+
+    /// <summary>
+    /// Sets the content and encrypts it immediately using the specified master password.
+    /// </summary>
+    /// <param name="masterPassword">Password for encryption.</param>
+    /// <param name="content">Plain content to be encrypted and stored.</param>
+    public async Task SetContentAsync(byte[] masterPassword, byte[] content)
+    {
+        // Parameter validation
+        ArgumentNullException.ThrowIfNull(masterPassword);
+        ArgumentNullException.ThrowIfNull(content);
+
+        // Encrypt the content first
+        var encryptedContent = await EncryptContentAsync(masterPassword, content);
+
+        // Write the encrypted content atomically
+        lock (_contentLock)
+        {
+            // Overwrite previous content, zero out if sensitive
+            ZeroMemory(_content);
+            _content = encryptedContent;
         }
     }
 
     public VaultVersion Version { get; private set; } = VaultVersion.Current;
 
-    public async Task EncryptContent(byte[] masterPassword)
+    private async Task<byte[]> EncryptContentAsync(byte[] masterPassword, byte[] decryptedContent)
     {
-        if (IsContentEncrypted) return;
         if (masterPassword == null || masterPassword.Length == 0)
             throw new ArgumentException("Master password cannot be null or empty.", nameof(masterPassword));
         if (Salt == null || Salt.Length == 0)
             throw new InvalidOperationException("Salt must be set before encrypting content.");
         var key = await Argon2Hash.HashBytes(masterPassword, this);
-        Content = Aes256.Encrypt(Content, key, Iv);
-        IsContentEncrypted = true;
+        return Aes256.Encrypt(decryptedContent, key, Iv);
     }
-    
-    public async Task DecryptContent(byte[] masterPassword)
+
+    private async Task<byte[]> DecryptContentAsync(byte[] masterPassword, byte[] encryptedContent)
     {
-        if (!IsContentEncrypted) return;
         if (masterPassword == null || masterPassword.Length == 0)
             throw new ArgumentException("Master password cannot be null or empty.", nameof(masterPassword));
         if (Salt == null || Salt.Length == 0)
             throw new InvalidOperationException("Salt must be set before decrypting content.");
         var key = await Argon2Hash.HashBytes(masterPassword, this);
-        Content = Aes256.Decrypt(Content, key, Iv);
-        IsContentEncrypted = false;
+        return Aes256.Decrypt(encryptedContent, key, Iv);
     }
 
     public static VaultParameters Default => new()
@@ -71,7 +117,7 @@ public record VaultParameters
             TlvElement.Argon2Iterations(Argon2Iterations),
             TlvElement.Argon2Parallelism(Argon2Parallelism),
             TlvElement.Iv(Iv),
-            TlvElement.Content(Content)
+            TlvElement.Content(_content)
         };
         var tlvStream = new TlvStream();
         await tlvStream.WriteAllAsync(tlvElements, cancellationToken);
@@ -118,7 +164,8 @@ public record VaultParameters
         if (ivElement == null) elementsNull.Add("IV");
         if (contentElement == null) elementsNull.Add("Content");
         if (elementsNull.Count > 0)
-            throw new InvalidOperationException($"Invalid vault file format. Missing elements: {string.Join(", ", elementsNull)}");
+            throw new InvalidOperationException(
+                $"Invalid vault file format. Missing elements: {string.Join(", ", elementsNull)}");
 
         if (magicElement!.Value.Length != 4 || !Encoding.UTF8.GetString(magicElement.Value).Equals(MagicNumber))
             throw new InvalidOperationException("Invalid vault file format. Expected signature not found.");
@@ -136,8 +183,8 @@ public record VaultParameters
         parameters.Iv = ivElement!.Value;
         if (parameters.Iv.Length != 16) throw new InvalidOperationException("IV must be exactly 16 bytes long.");
         parameters.IsContentEncrypted = true;
-        parameters.Content = contentElement!.Value;
-        if (parameters.Content.Length == 0) throw new InvalidOperationException("Content cannot be empty.");
+        parameters._content = contentElement!.Value;
+        if (parameters._content.Length == 0) throw new InvalidOperationException("Content cannot be empty.");
         return parameters;
     }
 }

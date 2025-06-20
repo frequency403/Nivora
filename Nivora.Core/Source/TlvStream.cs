@@ -70,12 +70,11 @@ public class TlvStream : IDisposable, IAsyncDisposable
             await using var encryptedFileStream = vaultFile.OpenRead();
             var filePathBytes = GetBytesFromFilePath(vaultFile.FullName);
             var shuffledBytes = ShuffleBytes(filePathBytes, 16);
-            using var decryptedFileStream = new MemoryStream();
+            var decryptedFileStream = new MemoryStream();
             await Aes256.DecryptStream(encryptedFileStream, decryptedFileStream, filePathBytes, shuffledBytes,
                 token: cancellationToken);
             await using var tlvStream = new TlvStream(decryptedFileStream, closeStream: true);
             var parameters = await VaultParameters.ReadFromTlvStream(tlvStream, cancellationToken);
-            await parameters.DecryptContent(password);
             return parameters;
         }
         catch (Exception )
@@ -87,11 +86,11 @@ public class TlvStream : IDisposable, IAsyncDisposable
     public static async Task WriteParametersAndEncrypt(VaultParameters parameters, FileInfo vaultFile, byte[] password,
         CancellationToken cancellationToken = default)
     {
-        await parameters.EncryptContent(password);
         var filePathBytes = GetBytesFromFilePath(vaultFile.FullName);
         var shuffledBytes = ShuffleBytes(filePathBytes, 16);
-        await using var encryptedFileStream = vaultFile.Open(FileMode.Truncate);
+        await using var encryptedFileStream = vaultFile.Open(vaultFile.Exists ? FileMode.Truncate : FileMode.CreateNew);
         await using var tlvStream = await parameters.WriteToTlvStream(cancellationToken);
+        tlvStream.Stream.Position = 0; // Ensure we start from the beginning
         await Aes256.EncryptStream(tlvStream.Stream, encryptedFileStream, filePathBytes, shuffledBytes, token: cancellationToken);
     }
 
@@ -151,10 +150,10 @@ public class TlvStream : IDisposable, IAsyncDisposable
         if (BitConverter.IsLittleEndian)
             Array.Reverse(lengthBytes);
 
-        await Stream.WriteAsync(lengthBytes, 0, 4, cancellationToken).ConfigureAwait(false);
+        await Stream.WriteAsync(lengthBytes.AsMemory(0, 4), cancellationToken);
 
         // Write Value
-        await Stream.WriteAsync(value, 0, value.Length, cancellationToken).ConfigureAwait(false);
+        await Stream.WriteAsync(value, cancellationToken);
     }
 
     /// <summary>
@@ -205,7 +204,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
         var tag = TlvTag.FromByte((byte)tagByte);
 
         var lengthBytes = new byte[4];
-        var readLen = await Stream.ReadAsync(lengthBytes.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
+        var readLen = await Stream.ReadAsync(lengthBytes.AsMemory(0, 4), cancellationToken);
         if (readLen != 4)
             throw new EndOfStreamException("Unexpected end of stream while reading TLV length.");
 
@@ -220,7 +219,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
         var read = 0;
         while (read < length)
         {
-            var r = await Stream.ReadAsync(value.AsMemory(read, length - read), cancellationToken).ConfigureAwait(false);
+            var r = await Stream.ReadAsync(value.AsMemory(read, length - read), cancellationToken);
             if (r == 0)
                 throw new EndOfStreamException("Unexpected end of stream while reading TLV value.");
             read += r;
@@ -246,7 +245,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
     public async Task WriteAllAsync(IEnumerable<TlvElement> elements, CancellationToken cancellationToken = default)
     {
         foreach (var element in elements.OrderBy(e => e.Tag.Value))
-            await WriteAsync(element.Tag, element.Value, cancellationToken).ConfigureAwait(false);
+            await WriteAsync(element.Tag, element.Value, cancellationToken);
     }
 
     /// <summary>
@@ -272,7 +271,7 @@ public class TlvStream : IDisposable, IAsyncDisposable
     {
         while (true)
         {
-            var element = await ReadAsync(cancellationToken).ConfigureAwait(false);
+            var element = await ReadAsync(cancellationToken);
             if (element == null)
                 yield break;
             yield return element;

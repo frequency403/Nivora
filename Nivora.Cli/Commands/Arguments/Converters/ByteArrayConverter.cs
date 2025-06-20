@@ -16,6 +16,6 @@ public class ByteArrayConverter : TypeConverter
         {
             return System.Text.Encoding.UTF8.GetBytes(strValue);
         }
-        return base.ConvertFrom(context, culture, value);
+        return Array.Empty<byte>();
     }
 }

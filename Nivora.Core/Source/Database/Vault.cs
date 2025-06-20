@@ -8,9 +8,6 @@ using Nivora.Core.Exceptions;
 using Nivora.Core.Models;
 using Nivora.Core.Streams;
 using Serilog;
-
-[module:DapperAot]
-
 namespace Nivora.Core.Database
 {
     /// <summary>
@@ -139,11 +136,9 @@ namespace Nivora.Core.Database
         {
             try
             {
-                await Connection.CloseAsync();
                 await using (var tempFileStream = await WriteDatabaseToFile(Connection, cancellationToken))
                 {
-                    Parameters.Content = await tempFileStream.ToArrayAsync(cancellationToken);
-                    await Parameters.EncryptContent(MasterPassword);
+                    await Parameters.SetContentAsync(MasterPassword, await tempFileStream.ToArrayAsync(cancellationToken));
                 }
                 await TlvStream.WriteParametersAndEncrypt(Parameters, Path, MasterPassword,
                     cancellationToken);
@@ -155,7 +150,7 @@ namespace Nivora.Core.Database
                     await DisposeAsync();
                     return false;
                 }
-                Connection = await ReadBinaryDatabaseToMemory(parameters.Content, cancellationToken);
+                Connection = await ReadBinaryDatabaseToMemory(await parameters.GetContentAsync(MasterPassword), cancellationToken);
             }
             catch (Exception e)
             {
@@ -180,7 +175,7 @@ namespace Nivora.Core.Database
             var parameters = await TlvStream.ReadEncryptedStream(fileInfo, password, token);
             if (parameters == null)
                 throw new InvalidOperationException("Failed to read vault parameters from the encrypted file.");
-            var memoryDatabase = await ReadBinaryDatabaseToMemory(parameters.Content, token);
+            var memoryDatabase = await ReadBinaryDatabaseToMemory(await parameters.GetContentAsync(password), token);
             return new Vault(_logger)
             {
                 Path = fileInfo,
@@ -219,7 +214,7 @@ namespace Nivora.Core.Database
             await using (var databaseStream = await WriteDatabaseToFile(memoryDatabase, token))
             {
                 databaseStream.Position = 0;
-                parameters.Content = await databaseStream.ToArrayAsync(token);
+                await parameters.SetContentAsync(MasterPassword, await databaseStream.ToArrayAsync(token));
             }
             await TlvStream.WriteParametersAndEncrypt(parameters, fileInfo, password, token);
             
@@ -263,47 +258,7 @@ namespace Nivora.Core.Database
             await fileDatabase.CloseAsync();
             return memoryDatabase;
         }
-
-        /// <summary>
-        /// Shuffles the input bytes in the pattern 0, N-1, 1, N-2, ... up to a maximum of <paramref name="size" /> elements.
-        /// If the input is shorter than <paramref name="size" />, uses only as many as are available.
-        /// </summary>
-        /// <param name="input">The input byte array to be permuted.</param>
-        /// <param name="size">Maximum number of bytes to output.</param>
-        /// <returns>Shuffled byte array.</returns>
-        internal static byte[] ShuffleBytes(byte[] input, int size)
-        {
-            var result = new byte[Math.Min(size, input.Length)];
-            var left = 0;
-            var right = input.Length - 1;
-            var index = 0;
-
-            while (index < result.Length && left <= right)
-            {
-                // Add from left
-                if (index < result.Length) result[index++] = input[left++];
-
-                // Add from right
-                if (index < result.Length && left <= right) result[index++] = input[right--];
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Gets the last <paramref name="count"/> bytes of the file path (UTF-8 encoded), padded with zeros if needed.
-        /// </summary>
-        /// <param name="path">The file path.</param>
-        /// <param name="count">Number of bytes to return.</param>
-        /// <returns>Byte array for key derivation.</returns>
-        internal byte[] GetBytesFromFilePath(string path, int count = 32)
-        {
-            var bytes = Encoding.UTF8.GetBytes(path).Reverse().Take(count).Reverse().ToArray();
-            if (bytes.Length >= count) return bytes;
-            var padding = new byte[count - bytes.Length];
-            return bytes.Concat(padding).ToArray();
-        }
-
+        
         /// <summary>
         /// Gets the full path to a vault file by name.
         /// </summary>
