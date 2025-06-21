@@ -1,6 +1,6 @@
 namespace Nivora.Core.Streams;
 
-public class TempFileStream : Stream
+public sealed class TempFileStream : Stream
 {
     private FileStream _fileStream = new(System.IO.Path.GetTempFileName(), FileMode.Create);
     public string Path => _fileStream.Name;
@@ -99,11 +99,8 @@ public class TempFileStream : Stream
 
     public override async ValueTask DisposeAsync()
     {
-        if (_fileStream != null)
-        {
-            await _fileStream.DisposeAsync();
-            File.Delete(_fileStream.Name);
-            _fileStream = null!;
-        }
+        await _fileStream.DisposeAsync();
+        File.Delete(_fileStream.Name);
+        _fileStream = null!;
     }
 }

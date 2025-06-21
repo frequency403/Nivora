@@ -20,7 +20,14 @@ namespace Nivora.Core.Database
 
         internal static Vault Empty(ILogger logger) => new(logger);
         
-        private byte[] MasterPassword { get; set; }
+        private byte[] MasterPassword { get; init; }
+        
+        public bool VerifyPassword(byte[] password)
+        {
+            if (password == null || password.Length == 0)
+                throw new ArgumentException("Password cannot be null or empty.", nameof(password));
+            return MasterPassword.SequenceEqual(password);
+        }
 
         // Hide default constructor for controlled initialization
         private Vault(ILogger logger)
@@ -138,11 +145,11 @@ namespace Nivora.Core.Database
             {
                 await using (var tempFileStream = await WriteDatabaseToFile(Connection, cancellationToken))
                 {
-                    await Parameters.SetContentAsync(MasterPassword, await tempFileStream.ToArrayAsync(cancellationToken));
+                    Parameters.SetContent(MasterPassword, await tempFileStream.ToArrayAsync(cancellationToken));
                 }
-                await TlvStream.WriteParametersAndEncrypt(Parameters, Path, MasterPassword,
+                await TlvStream.WriteParametersAndEncrypt(Parameters, Path,
                     cancellationToken);
-                var parameters = await TlvStream.ReadEncryptedStream(Path, MasterPassword, cancellationToken);
+                var parameters = await TlvStream.ReadEncryptedStream(Path, cancellationToken);
                 if (parameters == null)
                 {
                     _logger.Error("Failed to read vault parameters after writing.");
@@ -150,7 +157,7 @@ namespace Nivora.Core.Database
                     await DisposeAsync();
                     return false;
                 }
-                Connection = await ReadBinaryDatabaseToMemory(await parameters.GetContentAsync(MasterPassword), cancellationToken);
+                Connection = await ReadBinaryDatabaseToMemory(parameters.GetContent(MasterPassword), cancellationToken);
             }
             catch (Exception e)
             {
@@ -172,10 +179,10 @@ namespace Nivora.Core.Database
             var fileInfo = new FileInfo(path);
             if (!fileInfo.Exists)
                 throw new FileNotFoundException($"Vaultfile '{fileInfo.FullName}' not found.", fileInfo.FullName);
-            var parameters = await TlvStream.ReadEncryptedStream(fileInfo, password, token);
+            var parameters = await TlvStream.ReadEncryptedStream(fileInfo, token);
             if (parameters == null)
                 throw new InvalidOperationException("Failed to read vault parameters from the encrypted file.");
-            var memoryDatabase = await ReadBinaryDatabaseToMemory(await parameters.GetContentAsync(password), token);
+            var memoryDatabase = await ReadBinaryDatabaseToMemory(parameters.GetContent(password), token);
             return new Vault(_logger)
             {
                 Path = fileInfo,
@@ -214,9 +221,9 @@ namespace Nivora.Core.Database
             await using (var databaseStream = await WriteDatabaseToFile(memoryDatabase, token))
             {
                 databaseStream.Position = 0;
-                await parameters.SetContentAsync(MasterPassword, await databaseStream.ToArrayAsync(token));
+                parameters.SetContent(password, await databaseStream.ToArrayAsync(token));
             }
-            await TlvStream.WriteParametersAndEncrypt(parameters, fileInfo, password, token);
+            await TlvStream.WriteParametersAndEncrypt(parameters, fileInfo, token);
             
 
             return new Vault(_logger)

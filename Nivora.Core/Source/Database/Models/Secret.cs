@@ -31,11 +31,10 @@ public record Secret
 
 
         var iv = Aes256.GenerateRandomIv();
-        var key = await Argon2Hash.HashBytes(masterPassword);
         return new Secret
         {
             Name = name,
-            Value = Aes256.Encrypt(Encoding.UTF8.GetBytes(value), key, iv),
+            Value = Aes256.Encrypt(Encoding.UTF8.GetBytes(value), masterPassword, iv),
             Iv = iv
         };
     }

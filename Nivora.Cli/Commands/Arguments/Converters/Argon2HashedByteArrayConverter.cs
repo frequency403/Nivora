@@ -1,9 +1,10 @@
 using System.ComponentModel;
 using System.Globalization;
+using Nivora.Core;
 
 namespace Nivora.Cli.Commands.Arguments.Converters;
 
-public class ByteArrayConverter : TypeConverter
+public class Argon2HashedByteArrayConverter : TypeConverter
 {
     public override bool CanConvertFrom(ITypeDescriptorContext? context, Type sourceType)
     {
@@ -14,7 +15,7 @@ public class ByteArrayConverter : TypeConverter
     {
         if (value is string strValue)
         {
-            return System.Text.Encoding.UTF8.GetBytes(strValue);
+            return Argon2Hash.HashBytes(System.Text.Encoding.UTF8.GetBytes(strValue));
         }
         return Array.Empty<byte>();
     }

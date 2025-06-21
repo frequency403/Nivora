@@ -4,33 +4,18 @@ namespace Nivora.Core.Models;
 
 public record VaultVersion
 {
-    public VaultVersion(int major, int minor, int patch)
+    private VaultVersion(int major, int minor, int patch)
     {
         Major = major;
         Minor = minor;
         Patch = patch;
     }
 
-    public VaultVersion(int major, int minor)
-    {
-        Major = major;
-        Minor = minor;
-    }
-
-    public VaultVersion(int major)
-    {
-        Major = major;
-    }
-
-    private VaultVersion()
-    {
-    }
-
     public static VaultVersion Current { get; } = new(1, 0, 0);
 
-    public int Major { get; set; }
-    public int Minor { get; set; }
-    public int Patch { get; set; }
+    public int Major { get; }
+    public int Minor { get; }
+    public int Patch { get; }
 
     public static VaultVersion FromBytes(byte[] bytes)
     {

@@ -13,6 +13,6 @@ public class BaseArguments : CommandSettings
     
     [Description("The master password for the vault. If not specified, the user will be prompted to enter it.")]
     [CommandOption("-p|--password <Password>")]
-    [TypeConverter(typeof(ByteArrayConverter))]
+    [TypeConverter(typeof(Argon2HashedByteArrayConverter))]
     public byte[] Password { get; set; }
 }

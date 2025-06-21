@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Nivora.Cli.Commands.Arguments;
+using Nivora.Core;
 using Nivora.Core.Database;
 using Nivora.Core.Exceptions;
 using Nivora.Core.Interfaces;
@@ -23,18 +24,22 @@ public class InitCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComm
             logger.Error("Vault name cannot be null or empty.");
             return 1;
         }
-
-        if (arguments.Password.Length == 0)
-        {
-            arguments.Password = PasswordConverter.Utf8.Convert((await AnsiConsole.PromptAsync(new TextPrompt<string>($"Enter a password for your vault [red]\"{arguments.VaultName}\"[/]:").PromptStyle("green").Secret(), cancellationToken)).ToCharArray());
-        }
         
         try
         {
+            if (arguments.Password.Length == 0)
+            {
+                arguments.Password = await Argon2Hash.HashBytesAsync(PasswordConverter.Utf8.Convert((await AnsiConsole.PromptAsync(new TextPrompt<string>($"Enter a password for your vault [red]\"{arguments.VaultName}\"[/]:").PromptStyle("green").Secret(), cancellationToken)).ToCharArray()));
+            }
+            
             logger.Information("Initializing vault '{VaultName}'...", arguments.VaultName);
             AnsiConsole.Write("Initializing vault '{0}'", arguments.VaultName);
             var stopwatch = Stopwatch.StartNew();
-            await using var vault = await vaultFactory.CreateAsync(arguments.Password, arguments.VaultName, cancellationToken).Spinner(Spinner.Known.SimpleDotsScrolling);
+            await using var vault = await AnsiConsole
+                .Status()
+                .AutoRefresh(true)
+                .Spinner(Spinner.Known.SimpleDotsScrolling)
+                .StartAsync("Creating vault...", async _ => await vaultFactory.CreateAsync(arguments.Password, arguments.VaultName, cancellationToken));
             stopwatch.Stop();
             AnsiConsole.WriteLine();
             logger.Information("Created vault '{VaultName}' with version {Version} in {ElapsedTime} s",
@@ -47,11 +52,16 @@ public class InitCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComm
                 "Vault file '{VaultName}' already exists. Please choose a different name or delete the existing file.",
                 arguments.VaultName);
             AnsiConsole.MarkupLine($"[red]Vault file '{arguments.VaultName}' already exists.[/]");
+            return 1;
         }
         catch (Exception e)
         {
             logger.Error(e, "Failed to create vault '{VaultName}'", arguments.VaultName);
             AnsiConsole.MarkupLine($"[red]Failed to create vault '{arguments.VaultName}': {e.Message}[/]");
+            #if DEBUG
+            AnsiConsole.WriteException(e);
+            #endif
+            return 1;
         }
 
         return 0;
