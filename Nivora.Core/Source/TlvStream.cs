@@ -250,8 +250,8 @@ public record TlvTag
 
     public static TlvTag Magic => new(0x01);
     public static TlvTag Version => new(0x02);
-    public static TlvTag Iv => new(0x07);
-    public static TlvTag Content => new(0x08);
+    public static TlvTag Iv => new(0x03);
+    public static TlvTag Content => new(0x04);
 
     internal static TlvTag FromByte(byte value)
     {
