@@ -7,7 +7,7 @@ namespace Nivora.Core;
 /// <summary>
 ///     Provides methods to write and read custom TLV (Tag-Length-Value) structures, similar to ASN.1 encoding.
 /// </summary>
-public class TlvStream : IDisposable, IAsyncDisposable
+public sealed class TlvStream : IDisposable, IAsyncDisposable
 {
     private readonly bool _closeStream;
 
@@ -108,28 +108,17 @@ public class TlvStream : IDisposable, IAsyncDisposable
         if (_closeStream)
             Stream.Dispose();
     }
-
+    
     /// <summary>
-    ///     Writes a TLV element to the stream.
+    /// Writes a TLV element to the stream asynchronously.
     /// </summary>
-    /// <param name="tag">The tag identifier (1 byte, 0-255).</param>
-    /// <param name="value">The value as byte array.</param>
-    private void Write(TlvTag tag, byte[] value)
+    /// <param name="element">The TLV element to write.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A `ValueTask` representing the asynchronous operation.</returns>
+    private ValueTask WriteAsync(TlvElement element, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(value);
-
-        // Write Tag
-        Stream.WriteByte(tag.Value);
-
-        // Write Length (4 bytes, big endian)
-        var lengthBytes = BitConverter.GetBytes(value.Length);
-        if (BitConverter.IsLittleEndian)
-            Array.Reverse(lengthBytes);
-
-        Stream.Write(lengthBytes, 0, 4);
-
-        // Write Value
-        Stream.Write(value, 0, value.Length);
+        ArgumentNullException.ThrowIfNull(element);
+        return Stream.WriteAsync(element.ToTlvBytes(), cancellationToken);
     }
     
     /// <summary>
@@ -169,14 +158,14 @@ public class TlvStream : IDisposable, IAsyncDisposable
 
         return new TlvElement(tag, value);
     }
-
-    /// <summary>
-    ///     Writes multiple TLV elements to the stream.
-    /// </summary>
-    /// <param name="elements">The TLV elements to write.</param>
-    public void WriteElements(IEnumerable<TlvElement> elements)
+    
+    public async Task WriteElementsAsync(IEnumerable<TlvElement> elements, CancellationToken cancellationToken = default)
     {
-        foreach (var element in elements.OrderBy(e => e.Tag.Value)) Write(element.Tag, element.Value);
+        foreach (var element in elements.OrderBy(e => e.Tag.Value))
+        {
+            await WriteAsync(element, cancellationToken);
+            await Stream.FlushAsync(cancellationToken);
+        }
     }
 
     /// <summary>
@@ -205,10 +194,11 @@ public class TlvElement
     private const string MagicNumber = "NIVR";
 
     /// <summary>
-    ///     Initializes a new TLV element.
+    /// Initializes a new TLV element.
     /// </summary>
     /// <param name="tag">The tag (identifier).</param>
     /// <param name="value">The value as byte array.</param>
+    /// <exception cref="ArgumentNullException">Thrown if the value is null.</exception>
     public TlvElement(TlvTag tag, byte[] value)
     {
         Tag = tag;
@@ -216,43 +206,112 @@ public class TlvElement
     }
 
     /// <summary>
-    ///     Gets the tag (identifier).
+    /// Gets the tag (identifier) of the TLV element.
     /// </summary>
     public TlvTag Tag { get; }
 
     /// <summary>
-    ///     Gets the value as byte array.
+    /// Gets the value of the TLV element as a byte array.
     /// </summary>
     public byte[] Value { get; }
 
+    /// <summary>
+    /// Creates a predefined TLV element representing the magic number.
+    /// </summary>
     public static TlvElement Magic => new(TlvTag.Magic, Encoding.UTF8.GetBytes(MagicNumber));
+
+    /// <summary>
+    /// Creates a predefined TLV element representing the current version.
+    /// </summary>
     public static TlvElement Version => new(TlvTag.Version, VaultVersion.Current.ToBytes());
 
+    /// <summary>
+    /// Creates a TLV element representing an initialization vector (IV).
+    /// </summary>
+    /// <param name="iv">The initialization vector as a byte array.</param>
+    /// <returns>A new TLV element.</returns>
+    /// <exception cref="ArgumentNullException">Thrown if the IV is null.</exception>
     public static TlvElement Iv(byte[] iv)
     {
         return new TlvElement(TlvTag.Iv, iv ?? throw new ArgumentNullException(nameof(iv)));
     }
 
+    /// <summary>
+    /// Creates a TLV element representing content.
+    /// </summary>
+    /// <param name="content">The content as a byte array.</param>
+    /// <returns>A new TLV element.</returns>
+    /// <exception cref="ArgumentNullException">Thrown if the content is null.</exception>
     public static TlvElement Content(byte[] content)
     {
         return new TlvElement(TlvTag.Content, content ?? throw new ArgumentNullException(nameof(content)));
     }
+    
+    /// <summary>
+    /// Converts the TLV element into a byte array representation.
+    /// The format includes the tag, length (big-endian, 4 bytes), and value.
+    /// </summary>
+    /// <returns>A byte array representing the TLV element.</returns>
+    public byte[] ToTlvBytes()
+    {
+        var lengthBytes = BitConverter.GetBytes(Value.Length);
+        if (BitConverter.IsLittleEndian)
+            Array.Reverse(lengthBytes);
+    
+        var result = new byte[1 + 4 + Value.Length];
+        result[0] = Tag.Value; // Write Tag
+        Array.Copy(lengthBytes, 0, result, 1, 4); // Write Length
+        Array.Copy(Value, 0, result, 5, Value.Length); // Write Value
+    
+        return result;
+    }
 }
 
+/// <summary>
+/// Represents a tag in a TLV (Tag-Length-Value) structure.
+/// </summary>
 public record TlvTag
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TlvTag"/> class with the specified byte value.
+    /// </summary>
+    /// <param name="Value">The byte value representing the tag.</param>
     private TlvTag(byte Value)
     {
         this.Value = Value;
     }
 
+    /// <summary>
+    /// Gets the byte value of the tag.
+    /// </summary>
     public byte Value { get; }
 
+    /// <summary>
+    /// Predefined tag representing a magic number (0x01).
+    /// </summary>
     public static TlvTag Magic => new(0x01);
+
+    /// <summary>
+    /// Predefined tag representing a version (0x02).
+    /// </summary>
     public static TlvTag Version => new(0x02);
+
+    /// <summary>
+    /// Predefined tag representing an initialization vector (0x03).
+    /// </summary>
     public static TlvTag Iv => new(0x03);
+
+    /// <summary>
+    /// Predefined tag representing content (0x04).
+    /// </summary>
     public static TlvTag Content => new(0x04);
 
+    /// <summary>
+    /// Converts a byte value into a corresponding <see cref="TlvTag"/> instance.
+    /// </summary>
+    /// <param name="value">The byte value to convert.</param>
+    /// <returns>The corresponding <see cref="TlvTag"/> instance.</returns>
+    /// <exception cref="InvalidDataException">Thrown if the byte value does not match any predefined tag.</exception>
     internal static TlvTag FromByte(byte value)
     {
         return value switch

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Paddings;
@@ -10,6 +11,9 @@ namespace Nivora.Core;
 
 public class Aes256
 {
+
+    private static PaddedBufferedBlockCipher GetCipher() => new(new CbcBlockCipher(new AesEngine()), new Pkcs7Padding());
+
     /// <summary>
     ///     Encrypts plain bytes using AES-256 CBC with PKCS7 padding.
     /// </summary>
@@ -24,7 +28,7 @@ public class Aes256
         if (iv is not { Length: 16 })
             throw new ArgumentException("IV must be 16 bytes.");
 
-        var cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(new AesEngine()));
+        var cipher = GetCipher();
         cipher.Init(true, new ParametersWithIV(new KeyParameter(key), iv));
 
         var output = new byte[cipher.GetOutputSize(plainBytes.Length)];
@@ -52,7 +56,7 @@ public class Aes256
         if (iv is not { Length: 16 })
             throw new ArgumentException("IV must be 16 bytes.");
 
-        var cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(new AesEngine()));
+        var cipher = GetCipher();
         cipher.Init(false, new ParametersWithIV(new KeyParameter(key), iv));
 
         var output = new byte[cipher.GetOutputSize(cipherBytes.Length)];
@@ -87,8 +91,7 @@ public class Aes256
         if (!outputStream.CanWrite)
             throw new ArgumentException("Output stream must be writable.", nameof(outputStream));
 
-        // Create cipher for AES-256 CBC with PKCS7 padding
-        var cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(new AesEngine()));
+        var cipher = GetCipher();
         cipher.Init(true, new ParametersWithIV(new KeyParameter(key), iv));
 
         var inputBuffer = new byte[bufferSize];
@@ -129,8 +132,7 @@ public class Aes256
         if (!outputStream.CanWrite)
             throw new ArgumentException("Output stream must be writable.", nameof(outputStream));
 
-        // Create cipher for AES-256 CBC with PKCS7 padding
-        var cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(new AesEngine()));
+        var cipher = GetCipher();
         cipher.Init(false, new ParametersWithIV(new KeyParameter(key), iv));
 
         var inputBuffer = new byte[bufferSize];

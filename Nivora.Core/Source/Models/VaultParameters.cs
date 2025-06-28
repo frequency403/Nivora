@@ -44,8 +44,8 @@ public record VaultParameters
             encryptedContentCopy = (byte[])_content.Clone();
         }
 
-        // Decrypt content (method must be implemented by you)
-        return DecryptContent(masterPassword, encryptedContentCopy);
+        // Decrypt content
+        return DecryptContent(masterPassword, encryptedContentCopy); // TODO PadBlockCorrupted
     }
 
     /// <summary>
@@ -94,20 +94,19 @@ public record VaultParameters
 
     public async Task<TlvStream> WriteToTlvStream(CancellationToken cancellationToken = default)
     {
+        var tlvElements = new List<TlvElement>()
+        {
+            TlvElement.Magic,
+            TlvElement.Version,
+            TlvElement.Iv(Iv),
+        };
         lock (_contentLock)
         {
-            var tlvElements = new List<TlvElement>
-            {
-                TlvElement.Magic,
-                TlvElement.Version,
-                TlvElement.Iv(Iv),
-                TlvElement.Content(_content)
-            };
-            var tlvStream = new TlvStream();
-            tlvStream.WriteElements(tlvElements);
-            return tlvStream;
+            tlvElements.Add(TlvElement.Content(_content));
         }
-        
+        var tlvStream = new TlvStream();
+        await tlvStream.WriteElementsAsync(tlvElements, cancellationToken);
+        return tlvStream;
     }
 
     public static async Task<VaultParameters> ReadFromTlvStream(TlvStream tlvStream,
