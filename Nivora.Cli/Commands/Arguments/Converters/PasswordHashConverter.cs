@@ -1,10 +1,10 @@
 using System.ComponentModel;
 using System.Globalization;
-using Nivora.Core;
+using Nivora.Core.Models;
 
 namespace Nivora.Cli.Commands.Arguments.Converters;
 
-public class Argon2HashedByteArrayConverter : TypeConverter
+public class PasswordHashConverter : TypeConverter
 {
     public override bool CanConvertFrom(ITypeDescriptorContext? context, Type sourceType)
     {
@@ -15,8 +15,8 @@ public class Argon2HashedByteArrayConverter : TypeConverter
     {
         if (value is string strValue)
         {
-            return Argon2Hash.HashBytes(System.Text.Encoding.UTF8.GetBytes(strValue));
+            return PasswordHash.FromPlainText(strValue);
         }
-        return Array.Empty<byte>();
+        return PasswordHash.Empty;
     }
 }

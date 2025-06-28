@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Nivora.Cli.Commands.Arguments.Converters;
+using Nivora.Core.Models;
 using Spectre.Console.Cli;
 
 namespace Nivora.Cli.Commands.Arguments;
@@ -13,6 +14,6 @@ public class BaseArguments : CommandSettings
     
     [Description("The master password for the vault. If not specified, the user will be prompted to enter it.")]
     [CommandOption("-p|--password <Password>")]
-    [TypeConverter(typeof(Argon2HashedByteArrayConverter))]
-    public byte[] Password { get; set; }
+    [TypeConverter(typeof(PasswordHashConverter))]
+    public PasswordHash Password { get; set; }
 }

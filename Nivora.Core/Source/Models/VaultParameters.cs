@@ -32,11 +32,8 @@ public record VaultParameters
     /// </summary>
     /// <param name="masterPassword">The password to decrypt the content.</param>
     /// <returns>Decrypted content as byte array.</returns>
-    public byte[] GetContent(byte[] masterPassword)
+    public byte[] GetContent(PasswordHash masterPassword)
     {
-        // Parameter validation
-        ArgumentNullException.ThrowIfNull(masterPassword);
-
         byte[] encryptedContentCopy;
         lock (_contentLock)
         {
@@ -53,10 +50,9 @@ public record VaultParameters
     /// </summary>
     /// <param name="masterPassword">Password for encryption.</param>
     /// <param name="content">Plain content to be encrypted and stored.</param>
-    public void SetContent(byte[] masterPassword, byte[] content)
+    public void SetContent(PasswordHash masterPassword, byte[] content)
     {
         // Parameter validation
-        ArgumentNullException.ThrowIfNull(masterPassword);
         ArgumentNullException.ThrowIfNull(content);
 
         // Encrypt the content first
@@ -73,18 +69,18 @@ public record VaultParameters
 
     public VaultVersion Version { get; private set; } = VaultVersion.Current;
 
-    private byte[] EncryptContent(byte[] masterPassword, byte[] decryptedContent)
+    private byte[] EncryptContent(PasswordHash masterPassword, byte[] decryptedContent)
     {
-        if (masterPassword == null || masterPassword.Length == 0)
+        if (masterPassword.Length == 0)
             throw new ArgumentException("Master password cannot be null or empty.", nameof(masterPassword));
-        return Aes256.Encrypt(decryptedContent, masterPassword, Iv);
+        return Aes256.Encrypt(decryptedContent, masterPassword.Value, Iv);
     }
 
-    private byte[] DecryptContent(byte[] masterPassword, byte[] encryptedContent)
+    private byte[] DecryptContent(PasswordHash masterPassword, byte[] encryptedContent)
     {
-        if (masterPassword == null || masterPassword.Length == 0)
+        if (masterPassword.Length == 0)
             throw new ArgumentException("Master password cannot be null or empty.", nameof(masterPassword));
-        return Aes256.Decrypt(encryptedContent, masterPassword, Iv);
+        return Aes256.Decrypt(encryptedContent, masterPassword.Value, Iv);
     }
 
     public static VaultParameters Default => new()
@@ -98,7 +94,7 @@ public record VaultParameters
         {
             TlvElement.Magic,
             TlvElement.Version,
-            TlvElement.Iv(Iv),
+            TlvElement.Iv(Iv), // Set VaultContentClass as IV Provider here
         };
         lock (_contentLock)
         {

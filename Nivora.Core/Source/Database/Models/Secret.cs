@@ -1,4 +1,5 @@
 using System.Text;
+using Nivora.Core.Models;
 
 namespace Nivora.Core.Database.Models;
 
@@ -22,7 +23,7 @@ public record Secret
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; } = null;
 
-    public static async Task<Secret> CreateFromPlaintext(string name, string value, byte[] masterPassword)
+    public static async Task<Secret> CreateFromPlaintext(string name, string value, PasswordHash masterPassword)
     {
         if (string.IsNullOrEmpty(name))
             throw new ArgumentException("Name cannot be null or empty.", nameof(name));
@@ -34,7 +35,7 @@ public record Secret
         return new Secret
         {
             Name = name,
-            Value = Aes256.Encrypt(Encoding.UTF8.GetBytes(value), masterPassword, iv),
+            Value = Aes256.Encrypt(Encoding.UTF8.GetBytes(value), masterPassword.Value, iv),
             Iv = iv
         };
     }

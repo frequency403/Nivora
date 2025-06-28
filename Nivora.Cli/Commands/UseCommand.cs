@@ -5,6 +5,7 @@ using Nivora.Core.Database;
 using Nivora.Core.Database.Models;
 using Nivora.Core.Enums;
 using Nivora.Core.Interfaces;
+using Nivora.Core.Models;
 using Org.BouncyCastle.Crypto;
 using Serilog;
 using Spectre.Console;
@@ -18,9 +19,8 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
 
     public override async Task<int> ExecuteAsync(CommandContext context, UseArguments settings)
     {
-        settings.Password ??= [];
         var vaultFile =
-            new FileInfo(Path.Combine(NivoraStatics.NivoraApplicationDataPath, settings?.VaultName ?? "vault"));
+            new FileInfo(Path.Combine(NivoraStatics.NivoraApplicationDataPath, settings.VaultName ?? "vault"));
         if (!vaultFile.Exists)
         {
             logger.Information("No valid vault name provided. Listing all when available and force selection.");
@@ -42,12 +42,11 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
                 _cancellationTokenSource.Token);
         }
 
-        if (settings?.Password?.Length == 0)
+        if (settings?.Password.Length == 0)
         {
-            settings.Password = await Argon2Hash.HashBytesAsync(PasswordConverter.Utf8.Convert(
-                (await AnsiConsole.PromptAsync(new TextPrompt<string>("Enter a password for the vault:")
-                    .PromptStyle("green")
-                    .Secret(), _cancellationTokenSource.Token)).ToCharArray()));
+            settings.Password = await PasswordHash.FromPlainTextAsync(await AnsiConsole.PromptAsync(
+                new TextPrompt<string>("Enter a password for the vault:")
+                    .PromptStyle("green").Secret()));
         }
 
 
@@ -58,7 +57,7 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
                 .AutoRefresh(true)
                 .Spinner(Spinner.Known.SimpleDotsScrolling)
                 .StartAsync("Opening vault...",
-                    async _ => await vaultFactory.OpenAsync(settings?.Password, vaultFile.Name,
+                    async _ => await vaultFactory.OpenAsync(settings.Password, vaultFile.Name,
                         _cancellationTokenSource.Token));
             logger.Information("Vault '{VaultName}' opened successfully.", vaultFile.Name);
             AnsiConsole.MarkupLine($"[green]Vault '{vault.Name}' opened successfully![/]");
@@ -176,7 +175,7 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
                             .RoundedBorder()
                             .Title(new TableTitle($"[blue]Retrieved Secret[/] [gray]\"{retrievedSecret.Name}\"[/]"));
                         secretTable.AddRow(retrievedSecret.Name,
-                            Encoding.UTF8.GetString(Aes256.Decrypt(retrievedSecret.Value, settings.Password,
+                            Encoding.UTF8.GetString(Aes256.Decrypt(retrievedSecret.Value, settings.Password.Value,
                                 retrievedSecret.Iv)),
                             retrievedSecret.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
                             retrievedSecret.UpdatedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "N/A");
@@ -233,7 +232,7 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
                                 }
 
                                 secretToUpdate.Value = Aes256.Encrypt(Encoding.UTF8.GetBytes(newValue),
-                                    settings.Password, secretToUpdate.Iv);
+                                    settings.Password.Value, secretToUpdate.Iv);
                                 secretToUpdate =
                                     await vault.UpdateSecretAsync(secretToUpdate, _cancellationTokenSource.Token);
                                 AnsiConsole.MarkupLine(secretToUpdate is null
@@ -274,7 +273,7 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
         return 0;
     }
 
-    private async ValueTask<bool> ConfirmPasswordAsync(Func<byte[], bool> verifyPasswordFunc,
+    private async ValueTask<bool> ConfirmPasswordAsync(Func<PasswordHash, bool> verifyPasswordFunc,
         CancellationToken cancellationToken)
     {
         var password = await AnsiConsole.PromptAsync(new TextPrompt<string>("Confirm your password:")
@@ -283,7 +282,7 @@ public class UseCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComma
             .ValidationErrorMessage("[red]Wrong or invalid password.[/]")
             .Validate(password =>
                 !string.IsNullOrWhiteSpace(password) &&
-                verifyPasswordFunc(Argon2Hash.HashBytes(Encoding.UTF8.GetBytes(password)))
+                verifyPasswordFunc(PasswordHash.FromPlainText(password))
                     ? ValidationResult.Error("Wrong or invalid password.")
                     : ValidationResult.Success()), cancellationToken);
         return !string.IsNullOrWhiteSpace(password);

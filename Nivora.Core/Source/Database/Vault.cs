@@ -20,11 +20,11 @@ namespace Nivora.Core.Database
 
         internal static Vault Empty(ILogger logger) => new(logger);
         
-        private byte[] MasterPassword { get; init; }
+        private PasswordHash MasterPassword { get; init; }
         
-        public bool VerifyPassword(byte[] password)
+        public bool VerifyPassword(PasswordHash password)
         {
-            if (password == null || password.Length == 0)
+            if (password.Length == 0)
                 throw new ArgumentException("Password cannot be null or empty.", nameof(password));
             return MasterPassword.SequenceEqual(password);
         }
@@ -174,7 +174,7 @@ namespace Nivora.Core.Database
         /// <param name="password">The password to decrypt the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The opened Vault instance, or null if the file does not exist.</returns>
-        private async Task<Vault> OpenVault(string path, byte[] password, CancellationToken token)
+        private async Task<Vault> OpenVault(string path, PasswordHash password, CancellationToken token)
         {
             var fileInfo = new FileInfo(path);
             if (!fileInfo.Exists)
@@ -199,7 +199,7 @@ namespace Nivora.Core.Database
         /// <param name="password">The password for the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The created Vault instance.</returns>
-        private async Task<Vault> CreateVault(string path, byte[] password, CancellationToken token)
+        private async Task<Vault> CreateVault(string path, PasswordHash password, CancellationToken token)
         {
             var fileInfo = new FileInfo(path);
             VaultFileExistsException.ThrowIfExists(fileInfo);
@@ -287,7 +287,7 @@ namespace Nivora.Core.Database
         /// <param name="vaultName">The name of the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The created vault instance.</returns>
-        internal Task<Vault> CreateNew(byte[] password, string vaultName = null, CancellationToken token = default(CancellationToken))
+        internal Task<Vault> CreateNew(PasswordHash password, string vaultName = null, CancellationToken token = default(CancellationToken))
         {
             if (password == null || password.Length == 0)
                 throw new ArgumentException("Password cannot be null or empty.", nameof(password));
@@ -301,7 +301,7 @@ namespace Nivora.Core.Database
         /// <param name="vaultName">The name of the vault.</param>
         /// <param name="token">A cancellation token.</param>
         /// <returns>The opened vault instance, or null if not found.</returns>
-        internal Task<Vault> OpenExisting(byte[] password, string vaultName = null, CancellationToken token = default(CancellationToken))
+        internal Task<Vault> OpenExisting(PasswordHash password, string vaultName = null, CancellationToken token = default(CancellationToken))
         {
             return OpenVault(GetVaultPath(vaultName), password, token);
         }

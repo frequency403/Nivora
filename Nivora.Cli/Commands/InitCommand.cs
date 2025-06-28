@@ -4,6 +4,7 @@ using Nivora.Core;
 using Nivora.Core.Database;
 using Nivora.Core.Exceptions;
 using Nivora.Core.Interfaces;
+using Nivora.Core.Models;
 using Org.BouncyCastle.Crypto;
 using Serilog;
 using Spectre.Console;
@@ -18,7 +19,6 @@ public class InitCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComm
     public override async Task<int> ExecuteAsync(CommandContext context, BaseArguments arguments)
     {
         var cancellationToken = _cancellationTokenSource.Token;
-        arguments.Password ??= [];
         if (string.IsNullOrEmpty(arguments.VaultName))
         {
             logger.Error("Vault name cannot be null or empty.");
@@ -29,7 +29,11 @@ public class InitCommand(ILogger logger, IVaultFactory vaultFactory) : AsyncComm
         {
             if (arguments.Password.Length == 0)
             {
-                arguments.Password = await Argon2Hash.HashBytesAsync(PasswordConverter.Utf8.Convert((await AnsiConsole.PromptAsync(new TextPrompt<string>($"Enter a password for your vault [red]\"{arguments.VaultName}\"[/]:").PromptStyle("green").Secret(), cancellationToken)).ToCharArray()));
+                logger.Information("No password provided. Prompting user for a password.");
+                AnsiConsole.MarkupLine("[yellow]No password provided. Please enter a password for your vault.[/]");
+                arguments.Password = await PasswordHash.FromPlainTextAsync(await AnsiConsole.PromptAsync(
+                    new TextPrompt<string>($"Enter a password for your vault [red]\"{arguments.VaultName}\"[/]:")
+                        .PromptStyle("green").Secret(), cancellationToken));
             }
             
             logger.Information("Initializing vault '{VaultName}'...", arguments.VaultName);
